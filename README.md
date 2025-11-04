@@ -21,11 +21,27 @@ Graph Neural Network (GNN)を用いた優秀人材の特徴抽出・分析シス
 # 必要なパッケージのインストール
 pip install -r requirements.txt
 
+# 環境変数の設定（オプション）
+cp .env.example .env
+# 必要に応じて .env を編集
+
 # Streamlitアプリの起動
 streamlit run app.py
 ```
 
 ブラウザで `http://localhost:8501` にアクセスしてください。
+
+## 設定のカスタマイズ
+
+`config.yaml` ファイルを編集することで、以下の設定をカスタマイズできます：
+
+- **モデルパラメータ**: レイヤー数、隠れ層次元数、ドロップアウト率など
+- **学習パラメータ**: エポック数、学習率、早期停止の設定など
+- **分析パラメータ**: スキル閾値、表示件数など
+- **UIカラー**: グラフの色設定
+- **カラム名マッピング**: CSVファイルのカラム名設定
+
+設定変更後は、アプリを再起動してください。
 
 ## 使い方
 
@@ -111,7 +127,11 @@ streamlit run app.py
 .
 ├── app.py                      # Streamlitアプリケーション
 ├── gnn_talent_analyzer.py      # GNNモデルと分析ロジック
+├── config_loader.py            # 設定ファイル読み込みユーティリティ
+├── config.yaml                 # 設定ファイル（パラメータ、カラム名など）
 ├── requirements.txt            # 必要パッケージ
+├── .gitignore                  # Git除外ファイル
+├── .env.example                # 環境変数テンプレート
 └── README.md                   # このファイル
 ```
 

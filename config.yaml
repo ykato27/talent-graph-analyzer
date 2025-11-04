@@ -1,0 +1,93 @@
+# GNN優秀人材分析システム - 設定ファイル
+
+# GNNモデルの設定
+model:
+  n_layers: 3
+  hidden_dim: 128
+  dropout: 0.3
+  learning_rate: 0.01
+  k_neighbors: 10  # グラフ構築時の近傍数
+
+# 学習の設定
+training:
+  default_epochs: 100
+  min_epochs: 50
+  max_epochs: 500
+  early_stopping_patience: 20
+  batch_size_edges: 1000  # エッジサンプリング数
+
+# 分析の設定
+analysis:
+  min_excellent_members: 3
+  max_excellent_members_recommended: 20
+  top_skills_display: 50
+  essential_skill_threshold: 0.8  # 必須スキルとみなす保有率
+  important_skill_diff_threshold: 0.3  # 重要スキルとみなす差分
+  significant_skill_diff_threshold: 0.2  # 有意とみなす差分
+
+# データカラム名マッピング
+column_names:
+  member:
+    code: "メンバーコード  ###[member_code]###"
+    name: "メンバー名  ###[name]###"
+    retired_day: "退職年月日  ###[retired_day]###"
+    enter_day: "入社年月日  ###[enter_day]###"
+    job_grade: "職能・等級  ###[job_grade]###"
+    job_position: "役職  ###[job_position]###"
+
+  acquired:
+    member_code: "メンバーコード"
+    competence_type: "力量タイプ  ###[competence_type]###"
+    competence_code: "力量コード"
+    competence_name: "力量名"
+    level: "レベル"
+
+  competence_types:
+    skill: "SKILL"
+    education: "EDUCATION"
+    license: "LICENSE"
+
+# 役職マッピング
+position_mapping:
+  "部長": 4
+  "課長": 3
+  "係長": 2
+  "班長": 1
+  "職長": 1
+
+# UI設定
+ui:
+  page_title: "GNN優秀人材分析システム"
+  page_icon: "🎯"
+
+  # カラーパレット
+  colors:
+    excellent_group: "#FF6B6B"
+    non_excellent_group: "#4ECDC4"
+    primary: "#FF6B6B"
+    secondary: "#4ECDC4"
+
+  # 表示設定
+  display:
+    top_skills_chart: 15
+    member_scores_height: 400
+    chart_height: 600
+    histogram_bins: 20
+
+  # エポック推奨値
+  epoch_recommendations:
+    small_group: [50, 100]  # 5名以下
+    medium_group: [100, 200]  # 10名程度
+    large_group: [200, 300]  # 20名以上
+
+# ファイル設定
+files:
+  encoding: "utf-8-sig"
+  export:
+    skill_importance: "skill_importance.csv"
+    member_scores: "member_scores.csv"
+
+# ロギング設定
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
