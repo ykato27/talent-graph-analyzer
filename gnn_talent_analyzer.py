@@ -8,8 +8,10 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, roc_curve
 from sklearn.model_selection import StratifiedKFold
-from scipy.stats import fisher_exact
+from sklearn.linear_model import LogisticRegression
+from scipy.stats import fisher_exact, ttest_ind
 from statsmodels.stats.multitest import multipletests
+from itertools import combinations
 import warnings
 import logging
 import os
@@ -1078,6 +1080,392 @@ class TalentAnalyzer:
         except Exception as e:
             logger.error(f"モデル読み込みエラー: {str(e)}")
             return False
+
+    def estimate_causal_effects(self, excellent_members):
+        """
+        因果推論によるスキルの真の効果を推定
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+
+        Returns:
+        --------
+        causal_results: list
+            各スキルの因果効果推定結果
+        """
+        causal_config = get_config('causal_inference', {})
+
+        if not causal_config.get('enabled', True):
+            logger.info("因果推論が無効になっています")
+            return None
+
+        logger.info("因果推論を開始...")
+
+        excellent_indices = [self.member_to_idx[m] for m in excellent_members if m in self.member_to_idx]
+
+        # 交絡因子の取得
+        confounders = self._get_confounders()
+
+        causal_results = []
+
+        for skill_idx in range(len(self.skill_codes)):
+            result = self._estimate_skill_causal_effect(
+                skill_idx,
+                excellent_indices,
+                confounders,
+                causal_config
+            )
+
+            if result is not None:
+                causal_results.append(result)
+
+        # 因果効果の大きい順にソート
+        causal_results.sort(key=lambda x: abs(x.get('causal_effect', 0)), reverse=True)
+
+        logger.info(f"因果推論完了: {len(causal_results)}個のスキルを分析")
+
+        return causal_results
+
+    def _get_confounders(self):
+        """
+        交絡因子を取得
+
+        Returns:
+        --------
+        confounders: array
+            交絡因子の行列
+        """
+        confounder_config = get_config('causal_inference.confounders', {})
+
+        confounders = []
+
+        for idx in range(len(self.members)):
+            confounder_vec = []
+
+            # 勤続年数
+            if confounder_config.get('use_years_of_service', True):
+                confounder_vec.append(self.member_features[idx, 0])
+
+            # 等級
+            if confounder_config.get('use_grade', True):
+                confounder_vec.append(self.member_features[idx, 1])
+
+            # 役職
+            if confounder_config.get('use_position', True):
+                confounder_vec.append(self.member_features[idx, 2])
+
+            # スキル保有数
+            if confounder_config.get('use_skill_count', True):
+                confounder_vec.append(self.member_features[idx, 3])
+
+            confounders.append(confounder_vec)
+
+        return np.array(confounders)
+
+    def _estimate_skill_causal_effect(self, skill_idx, excellent_indices, confounders, causal_config):
+        """
+        特定スキルの因果効果を推定
+
+        Parameters:
+        -----------
+        skill_idx: int
+            スキルのインデックス
+        excellent_indices: list
+            優秀群のインデックスリスト
+        confounders: array
+            交絡因子の行列
+        causal_config: dict
+            因果推論の設定
+
+        Returns:
+        --------
+        result: dict
+            因果効果の推定結果
+        """
+        skill_code = self.skill_codes[skill_idx]
+        skill_name = self.skill_names[skill_code]
+
+        # スキル保有フラグ
+        has_skill = (self.skill_matrix[:, skill_idx] > 0).astype(int)
+
+        # スキル保有者が少なすぎる場合はスキップ
+        if has_skill.sum() < 5 or has_skill.sum() > len(has_skill) - 5:
+            return None
+
+        try:
+            # 1. 傾向スコアの計算
+            ps_model = LogisticRegression(max_iter=1000, random_state=42)
+            ps_model.fit(confounders, has_skill)
+            propensity_scores = ps_model.predict_proba(confounders)[:, 1]
+
+            # 2. 傾向スコアマッチング
+            treated_indices = np.where(has_skill == 1)[0]
+            control_indices = np.where(has_skill == 0)[0]
+
+            caliper = causal_config.get('propensity_score', {}).get('caliper', 0.1)
+            matched_pairs = []
+
+            for treated_idx in treated_indices:
+                # 傾向スコアが最も近い対照群を探す
+                ps_diff = np.abs(propensity_scores[control_indices] - propensity_scores[treated_idx])
+
+                if len(ps_diff) == 0:
+                    continue
+
+                min_diff_idx = ps_diff.argmin()
+
+                if ps_diff[min_diff_idx] < caliper:
+                    matched_control = control_indices[min_diff_idx]
+                    matched_pairs.append((treated_idx, matched_control))
+
+            min_pairs = causal_config.get('propensity_score', {}).get('min_matched_pairs', 5)
+
+            if len(matched_pairs) < min_pairs:
+                return {
+                    'skill_code': skill_code,
+                    'skill_name': skill_name,
+                    'causal_effect': None,
+                    'p_value': None,
+                    'n_matched_pairs': len(matched_pairs),
+                    'status': 'insufficient_matches',
+                    'interpretation': f'マッチング不可（ペア数: {len(matched_pairs)} < {min_pairs}）'
+                }
+
+            # 3. マッチングされたペアで効果を推定
+            treated_outcomes = []
+            control_outcomes = []
+
+            for treated_idx, control_idx in matched_pairs:
+                # アウトカム = 優秀かどうか（1 or 0）
+                treated_outcomes.append(1 if treated_idx in excellent_indices else 0)
+                control_outcomes.append(1 if control_idx in excellent_indices else 0)
+
+            # 平均処置効果（ATE: Average Treatment Effect）
+            ate = np.mean(treated_outcomes) - np.mean(control_outcomes)
+
+            # 統計的有意性（t検定）
+            if len(set(treated_outcomes)) > 1 and len(set(control_outcomes)) > 1:
+                t_stat, p_value = ttest_ind(treated_outcomes, control_outcomes)
+            else:
+                t_stat, p_value = 0, 1.0
+
+            # 信頼区間の計算（簡易版）
+            from scipy.stats import norm
+            n_t = len(treated_outcomes)
+            n_c = len(control_outcomes)
+
+            if n_t > 1 and n_c > 1:
+                se = np.sqrt(
+                    np.var(treated_outcomes) / n_t +
+                    np.var(control_outcomes) / n_c
+                )
+                z = norm.ppf(0.975)  # 95% CI
+                ci_lower = ate - z * se
+                ci_upper = ate + z * se
+            else:
+                ci_lower, ci_upper = ate, ate
+
+            return {
+                'skill_code': skill_code,
+                'skill_name': skill_name,
+                'causal_effect': ate,
+                'p_value': p_value,
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'n_matched_pairs': len(matched_pairs),
+                'n_treated': len(treated_indices),
+                'n_control': len(control_indices),
+                'status': 'success',
+                'interpretation': f'このスキルを習得すると優秀になる確率が{ate*100:.1f}%変化',
+                'significant': p_value < 0.05
+            }
+
+        except Exception as e:
+            logger.error(f"スキル {skill_name} の因果推論エラー: {str(e)}")
+            return {
+                'skill_code': skill_code,
+                'skill_name': skill_name,
+                'causal_effect': None,
+                'status': 'error',
+                'interpretation': f'エラー: {str(e)}'
+            }
+
+    def analyze_skill_interactions(self, excellent_members):
+        """
+        スキル間の相互作用を分析
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+
+        Returns:
+        --------
+        interaction_results: list
+            スキル相互作用の分析結果
+        """
+        interaction_config = get_config('skill_interaction', {})
+
+        if not interaction_config.get('enabled', True):
+            logger.info("スキル相互作用分析が無効になっています")
+            return None
+
+        logger.info("スキル相互作用分析を開始...")
+
+        excellent_indices = [self.member_to_idx[m] for m in excellent_members if m in self.member_to_idx]
+
+        n_skills = self.skill_matrix.shape[1]
+
+        # 組み合わせの数を制限
+        max_pairs = interaction_config.get('max_pairs_to_analyze', 1000)
+
+        # スキル保有率が低すぎるスキルを除外（計算時間削減）
+        skill_rates = np.mean(self.skill_matrix > 0, axis=0)
+        valid_skills = np.where((skill_rates >= 0.05) & (skill_rates <= 0.95))[0]
+
+        if len(valid_skills) > 100:
+            # スキル数が多い場合は、保有率が中程度のスキルを優先
+            valid_skills = valid_skills[:100]
+
+        skill_pairs = list(combinations(valid_skills, 2))
+
+        # ペア数を制限
+        if len(skill_pairs) > max_pairs:
+            # ランダムにサンプリング
+            np.random.seed(42)
+            selected_pairs = np.random.choice(len(skill_pairs), max_pairs, replace=False)
+            skill_pairs = [skill_pairs[i] for i in selected_pairs]
+
+        logger.info(f"{len(skill_pairs)}個のスキルペアを分析中...")
+
+        interaction_effects = []
+
+        for skill_a, skill_b in skill_pairs:
+            result = self._analyze_skill_pair_interaction(
+                skill_a,
+                skill_b,
+                excellent_indices,
+                interaction_config
+            )
+
+            if result is not None:
+                interaction_effects.append(result)
+
+        # 相乗効果の大きい順にソート
+        interaction_effects.sort(key=lambda x: x.get('synergy', 0), reverse=True)
+
+        logger.info(f"スキル相互作用分析完了: {len(interaction_effects)}個の有意な相乗効果を発見")
+
+        return interaction_effects
+
+    def _analyze_skill_pair_interaction(self, skill_a, skill_b, excellent_indices, interaction_config):
+        """
+        2つのスキルの相互作用を分析
+
+        Parameters:
+        -----------
+        skill_a: int
+            スキルAのインデックス
+        skill_b: int
+            スキルBのインデックス
+        excellent_indices: list
+            優秀群のインデックスリスト
+        interaction_config: dict
+            相互作用分析の設定
+
+        Returns:
+        --------
+        result: dict
+            相互作用の分析結果
+        """
+        skill_a_code = self.skill_codes[skill_a]
+        skill_b_code = self.skill_codes[skill_b]
+        skill_a_name = self.skill_names[skill_a_code]
+        skill_b_name = self.skill_names[skill_b_code]
+
+        # スキル保有フラグ
+        has_a = (self.skill_matrix[:, skill_a] > 0).astype(int)
+        has_b = (self.skill_matrix[:, skill_b] > 0).astype(int)
+
+        # 4つのグループに分ける
+        neither = (has_a == 0) & (has_b == 0)
+        only_a = (has_a == 1) & (has_b == 0)
+        only_b = (has_a == 0) & (has_b == 1)
+        both = (has_a == 1) & (has_b == 1)
+
+        # 各グループの人数が少なすぎる場合はスキップ
+        if neither.sum() < 3 or both.sum() < 3:
+            return None
+
+        # 各グループの優秀率
+        rate_neither = self._excellence_rate(neither, excellent_indices)
+        rate_a = self._excellence_rate(only_a, excellent_indices)
+        rate_b = self._excellence_rate(only_b, excellent_indices)
+        rate_both = self._excellence_rate(both, excellent_indices)
+
+        # 相加効果 = A単独の効果 + B単独の効果
+        effect_a = rate_a - rate_neither
+        effect_b = rate_b - rate_neither
+        additive_effect = effect_a + effect_b
+
+        # 実際の効果
+        actual_effect = rate_both - rate_neither
+
+        # 相乗効果 = 実際の効果 - 相加効果
+        synergy = actual_effect - additive_effect
+
+        # 閾値チェック
+        synergy_threshold = interaction_config.get('synergy_threshold', 0.1)
+        min_both_rate = interaction_config.get('min_both_rate', 0.7)
+
+        if synergy > synergy_threshold and rate_both >= min_both_rate:
+            return {
+                'skill_a_code': skill_a_code,
+                'skill_a_name': skill_a_name,
+                'skill_b_code': skill_b_code,
+                'skill_b_name': skill_b_name,
+                'synergy': synergy,
+                'rate_neither': rate_neither,
+                'rate_a': rate_a,
+                'rate_b': rate_b,
+                'rate_both': rate_both,
+                'n_neither': neither.sum(),
+                'n_a': only_a.sum(),
+                'n_b': only_b.sum(),
+                'n_both': both.sum(),
+                'effect_a': effect_a,
+                'effect_b': effect_b,
+                'additive_effect': additive_effect,
+                'actual_effect': actual_effect,
+                'interpretation': f'両方習得で+{synergy*100:.0f}%の追加効果（優秀率: {rate_both*100:.0f}%）'
+            }
+
+        return None
+
+    def _excellence_rate(self, mask, excellent_indices):
+        """
+        特定グループの優秀率を計算
+
+        Parameters:
+        -----------
+        mask: array
+            グループのマスク
+        excellent_indices: list
+            優秀群のインデックスリスト
+
+        Returns:
+        --------
+        rate: float
+            優秀率
+        """
+        if mask.sum() == 0:
+            return 0.0
+
+        group_indices = np.where(mask)[0]
+        excellent_in_group = len(set(group_indices) & set(excellent_indices))
+        return excellent_in_group / len(group_indices)
 
 
 def load_csv_files(member_path, acquired_path, skill_path, education_path, license_path):

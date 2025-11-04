@@ -49,6 +49,10 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'evaluation_results' not in st.session_state:
     st.session_state.evaluation_results = None
+if 'causal_results' not in st.session_state:
+    st.session_state.causal_results = None
+if 'interaction_results' not in st.session_state:
+    st.session_state.interaction_results = None
 if 'member_df' not in st.session_state:
     st.session_state.member_df = None
 
@@ -204,7 +208,7 @@ if st.session_state.data_loaded:
                 # 学習
                 analyzer.train(selected_members, epochs_unsupervised=epochs)
 
-                # 分析
+                # 基本分析
                 results = analyzer.analyze(selected_members)
                 st.session_state.results = results
 
@@ -216,6 +220,24 @@ if st.session_state.data_loaded:
                         st.session_state.evaluation_results = evaluation_results
                 else:
                     st.session_state.evaluation_results = None
+
+                # 因果推論
+                causal_config = get_config('causal_inference', {})
+                if causal_config.get('enabled', True):
+                    with st.spinner("因果推論を実行中..."):
+                        causal_results = analyzer.estimate_causal_effects(selected_members)
+                        st.session_state.causal_results = causal_results
+                else:
+                    st.session_state.causal_results = None
+
+                # スキル相互作用分析
+                interaction_config = get_config('skill_interaction', {})
+                if interaction_config.get('enabled', True):
+                    with st.spinner("スキル相互作用を分析中..."):
+                        interaction_results = analyzer.analyze_skill_interactions(selected_members)
+                        st.session_state.interaction_results = interaction_results
+                else:
+                    st.session_state.interaction_results = None
 
                 # モデル保存
                 versioning_config = get_config('versioning', {})
@@ -256,16 +278,23 @@ if st.session_state.data_loaded:
             "🗺️ 埋め込み可視化"
         ]
 
-        # モデル性能タブを条件付きで追加
+        # 条件付きでタブを追加
         if st.session_state.evaluation_results is not None:
             tabs.append("📈 モデル性能")
+        if st.session_state.causal_results is not None:
+            tabs.append("🔬 因果効果")
+        if st.session_state.interaction_results is not None:
+            tabs.append("🔗 スキル相互作用")
 
         tab_objects = st.tabs(tabs)
-        tab1 = tab_objects[0]
-        tab2 = tab_objects[1]
-        tab3 = tab_objects[2]
-        tab4 = tab_objects[3]
-        tab5 = tab_objects[4] if len(tab_objects) > 4 else None
+        tab_idx = 0
+        tab1 = tab_objects[tab_idx]; tab_idx += 1
+        tab2 = tab_objects[tab_idx]; tab_idx += 1
+        tab3 = tab_objects[tab_idx]; tab_idx += 1
+        tab4 = tab_objects[tab_idx]; tab_idx += 1
+        tab5 = tab_objects[tab_idx] if tab_idx < len(tab_objects) else None; tab_idx += 1 if tab5 is not None else 0
+        tab6 = tab_objects[tab_idx] if tab_idx < len(tab_objects) else None; tab_idx += 1 if tab6 is not None else 0
+        tab7 = tab_objects[tab_idx] if tab_idx < len(tab_objects) else None
 
         with tab1:
             st.subheader(f"優秀群に特徴的なスキル Top{MAX_EXCELLENT_RECOMMENDED}")
@@ -600,6 +629,223 @@ if st.session_state.data_loaded:
                         - PrecisionとRecallの調和平均
                         - バランスの取れた指標
                         """)
+
+        # 因果効果タブ
+        if tab6 is not None:
+            with tab6:
+                st.subheader("スキルの因果効果推定")
+
+                causal_results = st.session_state.causal_results
+
+                if causal_results is None or len(causal_results) == 0:
+                    st.info("因果推論の結果がありません")
+                else:
+                    st.markdown("""
+                    **因果推論とは**: 傾向スコアマッチングにより、勤続年数・等級・役職などの交絡因子を調整し、
+                    スキルの**純粋な効果**を推定します。「このスキルを習得すると優秀になる確率がX%変化する」
+                    という因果関係を定量化します。
+                    """)
+
+                    # 有意な因果効果のみをフィルタ
+                    significant_causal = [r for r in causal_results if r.get('status') == 'success' and r.get('significant', False)]
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("分析スキル数", len(causal_results))
+                    with col2:
+                        st.metric("有意な因果効果", len(significant_causal))
+                    with col3:
+                        successful = len([r for r in causal_results if r.get('status') == 'success'])
+                        st.metric("マッチング成功", f"{successful}個")
+
+                    # Top20の因果効果を表示
+                    st.markdown("### 因果効果が大きいスキル Top20")
+
+                    causal_df = pd.DataFrame([r for r in causal_results if r.get('causal_effect') is not None][:20])
+
+                    if len(causal_df) > 0:
+                        causal_df_display = causal_df.copy()
+                        causal_df_display['因果効果'] = causal_df_display['causal_effect'].apply(lambda x: f"{x*100:+.1f}%")
+                        causal_df_display['p値'] = causal_df_display['p_value'].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "N/A")
+                        causal_df_display['マッチングペア数'] = causal_df_display['n_matched_pairs']
+                        causal_df_display['有意'] = causal_df_display['significant'].apply(lambda x: '✓' if x else '')
+
+                        if 'ci_lower' in causal_df_display.columns and 'ci_upper' in causal_df_display.columns:
+                            causal_df_display['95%CI'] = causal_df_display.apply(
+                                lambda row: f"[{row['ci_lower']*100:.1f}%, {row['ci_upper']*100:.1f}%]"
+                                if pd.notna(row['ci_lower']) and pd.notna(row['ci_upper']) else "N/A",
+                                axis=1
+                            )
+                            columns_to_show = ['skill_name', '因果効果', '95%CI', 'p値', 'マッチングペア数', '有意']
+                        else:
+                            columns_to_show = ['skill_name', '因果効果', 'p値', 'マッチングペア数', '有意']
+
+                        st.dataframe(
+                            causal_df_display[columns_to_show].rename(columns={'skill_name': 'スキル名'}),
+                            use_container_width=True
+                        )
+
+                        # 因果効果の可視化
+                        st.markdown("### 因果効果の可視化")
+
+                        fig = go.Figure()
+
+                        top_effects = causal_df.head(15)
+
+                        colors = ['green' if x > 0 else 'red' for x in top_effects['causal_effect']]
+
+                        fig.add_trace(go.Bar(
+                            x=top_effects['causal_effect'] * 100,
+                            y=top_effects['skill_name'],
+                            orientation='h',
+                            marker_color=colors,
+                            text=[f"{x*100:+.1f}%" for x in top_effects['causal_effect']],
+                            textposition='outside'
+                        ))
+
+                        fig.update_layout(
+                            title="スキルの因果効果（優秀になる確率の変化）",
+                            xaxis_title="因果効果 (%)",
+                            yaxis_title="スキル名",
+                            height=500,
+                            yaxis={'categoryorder': 'total ascending'}
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        st.info("""
+                        **解釈のポイント**:
+                        - プラスの値: スキルを習得すると優秀になる確率が上昇
+                        - マイナスの値: スキルと優秀さに負の関係（稀）
+                        - 95%CIが0を跨がない場合、統計的に有意
+                        """)
+                    else:
+                        st.warning("因果効果を推定できたスキルがありません")
+
+                    # マッチング失敗の理由
+                    failed = [r for r in causal_results if r.get('status') != 'success']
+                    if len(failed) > 0:
+                        with st.expander(f"⚠️ マッチング失敗スキル ({len(failed)}個)"):
+                            failed_df = pd.DataFrame(failed)
+                            st.dataframe(
+                                failed_df[['skill_name', 'interpretation']].rename(columns={
+                                    'skill_name': 'スキル名',
+                                    'interpretation': '理由'
+                                }),
+                                use_container_width=True
+                            )
+
+        # スキル相互作用タブ
+        if tab7 is not None:
+            with tab7:
+                st.subheader("スキル相互作用分析")
+
+                interaction_results = st.session_state.interaction_results
+
+                if interaction_results is None or len(interaction_results) == 0:
+                    st.info("スキル相互作用の結果がありません")
+                else:
+                    st.markdown("""
+                    **相互作用とは**: 2つのスキルを組み合わせることで、
+                    それぞれ単独で持つよりも**大きな効果**が得られることです。
+                    相乗効果（シナジー）を定量化し、効果的なスキル組み合わせを発見します。
+                    """)
+
+                    st.metric("発見された相乗効果", f"{len(interaction_results)}組")
+
+                    # Top15の相互作用を表示
+                    st.markdown("### 相乗効果が大きいスキル組み合わせ Top15")
+
+                    interaction_df = pd.DataFrame(interaction_results[:15])
+
+                    if len(interaction_df) > 0:
+                        interaction_df_display = interaction_df.copy()
+                        interaction_df_display['スキルA'] = interaction_df_display['skill_a_name']
+                        interaction_df_display['スキルB'] = interaction_df_display['skill_b_name']
+                        interaction_df_display['相乗効果'] = interaction_df_display['synergy'].apply(lambda x: f"+{x*100:.1f}%")
+                        interaction_df_display['両方保有時の優秀率'] = interaction_df_display['rate_both'].apply(lambda x: f"{x*100:.0f}%")
+                        interaction_df_display['A単独'] = interaction_df_display['rate_a'].apply(lambda x: f"{x*100:.0f}%")
+                        interaction_df_display['B単独'] = interaction_df_display['rate_b'].apply(lambda x: f"{x*100:.0f}%")
+                        interaction_df_display['どちらもなし'] = interaction_df_display['rate_neither'].apply(lambda x: f"{x*100:.0f}%")
+
+                        st.dataframe(
+                            interaction_df_display[['スキルA', 'スキルB', '相乗効果', '両方保有時の優秀率', 'A単独', 'B単独', 'どちらもなし']],
+                            use_container_width=True
+                        )
+
+                        # 相乗効果の可視化
+                        st.markdown("### 相乗効果の可視化")
+
+                        top_interactions = interaction_results[:10]
+
+                        fig = go.Figure()
+
+                        labels = [f"{r['skill_a_name']}\n+\n{r['skill_b_name']}" for r in top_interactions]
+                        synergies = [r['synergy'] * 100 for r in top_interactions]
+
+                        fig.add_trace(go.Bar(
+                            x=synergies,
+                            y=labels,
+                            orientation='h',
+                            marker_color='purple',
+                            text=[f"+{s:.1f}%" for s in synergies],
+                            textposition='outside'
+                        ))
+
+                        fig.update_layout(
+                            title="スキル相乗効果 Top10",
+                            xaxis_title="相乗効果 (%)",
+                            yaxis_title="スキル組み合わせ",
+                            height=500,
+                            yaxis={'categoryorder': 'total ascending'}
+                        )
+
+                        st.plotly_chart(fig, use_container_width=True)
+
+                        # 詳細な内訳を表示
+                        st.markdown("### 効果の内訳（Top5）")
+
+                        for idx, interaction in enumerate(interaction_results[:5]):
+                            with st.expander(f"{idx+1}. {interaction['skill_a_name']} + {interaction['skill_b_name']}"):
+                                col1, col2, col3, col4 = st.columns(4)
+
+                                with col1:
+                                    st.metric("どちらもなし", f"{interaction['rate_neither']*100:.0f}%",
+                                             help=f"サンプル数: {interaction['n_neither']}名")
+                                with col2:
+                                    st.metric(f"{interaction['skill_a_name']}のみ",
+                                             f"{interaction['rate_a']*100:.0f}%",
+                                             delta=f"+{interaction['effect_a']*100:.1f}%",
+                                             help=f"サンプル数: {interaction['n_a']}名")
+                                with col3:
+                                    st.metric(f"{interaction['skill_b_name']}のみ",
+                                             f"{interaction['rate_b']*100:.0f}%",
+                                             delta=f"+{interaction['effect_b']*100:.1f}%",
+                                             help=f"サンプル数: {interaction['n_b']}名")
+                                with col4:
+                                    st.metric("両方保有",
+                                             f"{interaction['rate_both']*100:.0f}%",
+                                             delta=f"+{interaction['actual_effect']*100:.1f}%",
+                                             help=f"サンプル数: {interaction['n_both']}名")
+
+                                st.markdown(f"""
+                                **相加効果**: {interaction['additive_effect']*100:.1f}%
+                                （A単独 + B単独の効果を足し合わせたもの）
+
+                                **実際の効果**: {interaction['actual_effect']*100:.1f}%
+
+                                **相乗効果**: {interaction['synergy']*100:.1f}%
+                                （実際の効果 - 相加効果 = **追加で得られる効果**）
+                                """)
+
+                        st.info("""
+                        **解釈のポイント**:
+                        - 相乗効果が大きいほど、両スキルを組み合わせる価値が高い
+                        - 育成計画では、相乗効果のあるスキルをセットで習得させることが効果的
+                        - 単独では効果が小さくても、組み合わせると大きな効果を発揮するスキルペアに注目
+                        """)
+                    else:
+                        st.warning("相乗効果のあるスキル組み合わせが見つかりませんでした")
 
         # 推奨育成プラン
         st.markdown("---")
