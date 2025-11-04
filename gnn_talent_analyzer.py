@@ -6,12 +6,59 @@ GNNベース優秀人材分析システム
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import roc_auc_score, classification_report
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, roc_curve
 from sklearn.model_selection import StratifiedKFold
+from scipy.stats import fisher_exact
+from statsmodels.stats.multitest import multipletests
 import warnings
+import logging
+import os
+import pickle
+import json
+from datetime import datetime
+from pathlib import Path
 from config_loader import get_config
 
 warnings.filterwarnings('ignore')
+
+# ロギング設定
+def setup_logging():
+    """ロギングの設定"""
+    log_config = get_config('logging', {})
+    log_level = getattr(logging, log_config.get('level', 'INFO'))
+    log_format = log_config.get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # ロガーの設定
+    logger = logging.getLogger('TalentAnalyzer')
+    logger.setLevel(log_level)
+
+    # コンソールハンドラ
+    if log_config.get('console_logging', True):
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        console_handler.setFormatter(logging.Formatter(log_format))
+        logger.addHandler(console_handler)
+
+    # ファイルハンドラ
+    if log_config.get('file_logging', True):
+        log_dir = Path(get_config('versioning.log_dir', './logs'))
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        log_file = log_dir / log_config.get('log_file', 'talent_analyzer.log')
+
+        from logging.handlers import RotatingFileHandler
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=log_config.get('max_bytes', 10485760),
+            backupCount=log_config.get('backup_count', 5)
+        )
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        logger.addHandler(file_handler)
+
+    return logger
+
+logger = setup_logging()
 
 
 class SimpleGNN:
@@ -450,7 +497,7 @@ class TalentAnalyzer:
         results: dict
             分析結果
         """
-        print("\n分析実行中...")
+        logger.info(f"分析実行中... 優秀群: {len(excellent_members)}名")
 
         # 設定から閾値を取得
         top_skills = get_config('analysis.top_skills_display', 50)
@@ -491,8 +538,17 @@ class TalentAnalyzer:
                 'rate_diff': diff,
                 'excellent_level': excellent_level,
                 'non_excellent_level': non_excellent_level,
+                'excellent_count': excellent_count,
+                'non_excellent_count': non_excellent_count,
                 'importance_score': diff * (1 + excellent_level * 0.1)  # 保有率差 × レベル補正
             })
+
+        # 統計的有意性検定を実行
+        skill_importance = self._add_statistical_significance(
+            skill_importance,
+            len(excellent_indices),
+            len(non_excellent_indices)
+        )
 
         # 重要度でソート
         skill_importance = sorted(skill_importance, key=lambda x: x['importance_score'], reverse=True)
@@ -524,8 +580,504 @@ class TalentAnalyzer:
             'excellent_indices': excellent_indices
         }
 
-        print("分析完了")
+        logger.info("分析完了")
         return results
+
+    def _add_statistical_significance(self, skill_importance, n_excellent, n_non_excellent):
+        """
+        統計的有意性検定を追加
+
+        Parameters:
+        -----------
+        skill_importance: list
+            スキル重要度のリスト
+        n_excellent: int
+            優秀群の人数
+        n_non_excellent: int
+            非優秀群の人数
+
+        Returns:
+        --------
+        skill_importance: list
+            統計的検定結果を追加したスキル重要度のリスト
+        """
+        logger.info("統計的有意性検定を実行中...")
+
+        # 設定を取得
+        test_config = get_config('statistical_tests', {})
+        alpha = test_config.get('significance_level', 0.05)
+        correction_method = test_config.get('multiple_testing_correction', 'fdr_bh')
+        show_ci = test_config.get('show_confidence_intervals', True)
+        ci_level = test_config.get('confidence_level', 0.95)
+
+        p_values = []
+
+        for skill in skill_importance:
+            # 2x2分割表の作成
+            excellent_has = skill['excellent_count']
+            excellent_not = n_excellent - excellent_has
+            non_excellent_has = skill['non_excellent_count']
+            non_excellent_not = n_non_excellent - non_excellent_has
+
+            contingency_table = [
+                [excellent_has, excellent_not],
+                [non_excellent_has, non_excellent_not]
+            ]
+
+            # Fisher正確検定
+            try:
+                odds_ratio, p_value = fisher_exact(contingency_table)
+            except:
+                odds_ratio, p_value = 1.0, 1.0
+
+            skill['p_value'] = p_value
+            skill['odds_ratio'] = odds_ratio
+            p_values.append(p_value)
+
+            # 信頼区間の計算（Wald法による近似）
+            if show_ci:
+                from scipy.stats import norm
+                z = norm.ppf(1 - (1 - ci_level) / 2)
+
+                # 優秀群の保有率の信頼区間
+                p1 = skill['excellent_rate']
+                se1 = np.sqrt(p1 * (1 - p1) / n_excellent) if n_excellent > 0 else 0
+                ci1_lower = max(0, p1 - z * se1)
+                ci1_upper = min(1, p1 + z * se1)
+
+                # 非優秀群の保有率の信頼区間
+                p2 = skill['non_excellent_rate']
+                se2 = np.sqrt(p2 * (1 - p2) / n_non_excellent) if n_non_excellent > 0 else 0
+                ci2_lower = max(0, p2 - z * se2)
+                ci2_upper = min(1, p2 + z * se2)
+
+                skill['excellent_rate_ci'] = (ci1_lower, ci1_upper)
+                skill['non_excellent_rate_ci'] = (ci2_lower, ci2_upper)
+
+        # 多重検定補正
+        if correction_method != 'none' and len(p_values) > 0:
+            try:
+                reject, p_adjusted, _, _ = multipletests(
+                    p_values,
+                    alpha=alpha,
+                    method=correction_method
+                )
+
+                for i, skill in enumerate(skill_importance):
+                    skill['p_adjusted'] = p_adjusted[i]
+                    skill['significant'] = reject[i]
+                    skill['significance_level'] = self._get_significance_label(p_adjusted[i])
+            except:
+                logger.warning("多重検定補正に失敗しました")
+                for skill in skill_importance:
+                    skill['p_adjusted'] = skill['p_value']
+                    skill['significant'] = skill['p_value'] < alpha
+                    skill['significance_level'] = self._get_significance_label(skill['p_value'])
+        else:
+            for skill in skill_importance:
+                skill['p_adjusted'] = skill['p_value']
+                skill['significant'] = skill['p_value'] < alpha
+                skill['significance_level'] = self._get_significance_label(skill['p_value'])
+
+        logger.info(f"統計的検定完了: {sum([s['significant'] for s in skill_importance])}個のスキルが有意")
+
+        return skill_importance
+
+    def _get_significance_label(self, p_value):
+        """
+        有意性のラベルを取得
+
+        Parameters:
+        -----------
+        p_value: float
+            p値
+
+        Returns:
+        --------
+        label: str
+            有意性ラベル
+        """
+        if p_value < 0.001:
+            return '***'
+        elif p_value < 0.01:
+            return '**'
+        elif p_value < 0.05:
+            return '*'
+        else:
+            return 'n.s.'
+
+    def evaluate_model(self, excellent_members, epochs_unsupervised=None):
+        """
+        モデルの評価を実行
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        epochs_unsupervised: int, optional
+            学習エポック数
+
+        Returns:
+        --------
+        evaluation_results: dict
+            評価結果
+        """
+        logger.info("モデル評価を開始...")
+
+        eval_config = get_config('evaluation', {})
+
+        if not eval_config.get('enabled', True):
+            logger.info("モデル評価が無効になっています")
+            return None
+
+        method = eval_config.get('method', 'holdout')
+
+        results = {}
+
+        if method == 'holdout':
+            results = self._evaluate_holdout(excellent_members, epochs_unsupervised)
+        elif method == 'loocv':
+            results = self._evaluate_loocv(excellent_members, epochs_unsupervised)
+        elif method == 'both':
+            results['holdout'] = self._evaluate_holdout(excellent_members, epochs_unsupervised)
+            results['loocv'] = self._evaluate_loocv(excellent_members, epochs_unsupervised)
+        else:
+            # サンプル数に応じて自動選択
+            if len(excellent_members) <= eval_config.get('loocv', {}).get('small_sample_threshold', 10):
+                logger.info(f"優秀群が{len(excellent_members)}名のため、LOOCVを使用します")
+                results = self._evaluate_loocv(excellent_members, epochs_unsupervised)
+            else:
+                results = self._evaluate_holdout(excellent_members, epochs_unsupervised)
+
+        logger.info("モデル評価完了")
+        return results
+
+    def _evaluate_holdout(self, excellent_members, epochs_unsupervised=None):
+        """
+        Holdout法によるモデル評価
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        epochs_unsupervised: int, optional
+            学習エポック数
+
+        Returns:
+        --------
+        results: dict
+            評価結果
+        """
+        logger.info("Holdout法で評価中...")
+
+        eval_config = get_config('evaluation.holdout', {})
+        test_ratio = eval_config.get('test_ratio', 0.2)
+        random_seed = eval_config.get('random_seed', 42)
+
+        np.random.seed(random_seed)
+
+        # テストデータの分割
+        n_test = max(1, int(len(excellent_members) * test_ratio))
+        test_indices = np.random.choice(len(excellent_members), n_test, replace=False)
+
+        test_members = [excellent_members[i] for i in test_indices]
+        train_members = [m for i, m in enumerate(excellent_members) if i not in test_indices]
+
+        logger.info(f"訓練データ: {len(train_members)}名, テストデータ: {len(test_members)}名")
+
+        # 訓練
+        self.train(train_members, epochs_unsupervised=epochs_unsupervised)
+
+        # 評価
+        train_scores, train_labels = self._get_scores_and_labels(train_members)
+        test_scores, test_labels = self._get_scores_and_labels(test_members)
+
+        # メトリクスの計算
+        train_metrics = self._calculate_metrics(train_scores, train_labels, "Train")
+        test_metrics = self._calculate_metrics(test_scores, test_labels, "Test")
+
+        # 過学習の検出
+        overfitting_threshold = get_config('evaluation.warn_overfitting_threshold', 0.2)
+        auc_diff = train_metrics.get('auc', 0) - test_metrics.get('auc', 0)
+        is_overfitting = auc_diff > overfitting_threshold
+
+        results = {
+            'method': 'holdout',
+            'train_metrics': train_metrics,
+            'test_metrics': test_metrics,
+            'n_train': len(train_members),
+            'n_test': len(test_members),
+            'is_overfitting': is_overfitting,
+            'auc_diff': auc_diff
+        }
+
+        if is_overfitting:
+            logger.warning(f"過学習の可能性があります（AUC差分: {auc_diff:.3f}）")
+
+        return results
+
+    def _evaluate_loocv(self, excellent_members, epochs_unsupervised=None):
+        """
+        Leave-One-Out Cross-Validation によるモデル評価
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        epochs_unsupervised: int, optional
+            学習エポック数
+
+        Returns:
+        --------
+        results: dict
+            評価結果
+        """
+        logger.info("LOOCV（Leave-One-Out Cross-Validation）で評価中...")
+
+        all_scores = []
+        all_labels = []
+
+        for i, test_member in enumerate(excellent_members):
+            logger.info(f"LOOCV: {i+1}/{len(excellent_members)}")
+
+            # 訓練データ（1名を除く）
+            train_members = [m for j, m in enumerate(excellent_members) if j != i]
+
+            # 訓練
+            self.train(train_members, epochs_unsupervised=epochs_unsupervised)
+
+            # テストメンバーのスコアを取得
+            test_member_idx = self.member_to_idx.get(test_member)
+            if test_member_idx is not None:
+                distance = np.linalg.norm(self.embeddings[test_member_idx] - self.prototype)
+                max_distance = np.max([np.linalg.norm(emb - self.prototype) for emb in self.embeddings])
+                score = (1 - distance / max_distance) * 100
+
+                all_scores.append(score)
+                all_labels.append(1)  # 優秀群
+
+        # 非優秀群のスコアも取得（最終モデルで）
+        non_excellent_members = [m for m in self.members if m not in excellent_members]
+        for member_code in non_excellent_members:
+            member_idx = self.member_to_idx.get(member_code)
+            if member_idx is not None:
+                distance = np.linalg.norm(self.embeddings[member_idx] - self.prototype)
+                max_distance = np.max([np.linalg.norm(emb - self.prototype) for emb in self.embeddings])
+                score = (1 - distance / max_distance) * 100
+
+                all_scores.append(score)
+                all_labels.append(0)  # 非優秀群
+
+        # メトリクスの計算
+        metrics = self._calculate_metrics(all_scores, all_labels, "LOOCV")
+
+        results = {
+            'method': 'loocv',
+            'metrics': metrics,
+            'n_folds': len(excellent_members)
+        }
+
+        return results
+
+    def _get_scores_and_labels(self, excellent_members):
+        """
+        優秀群と非優秀群のスコアとラベルを取得
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+
+        Returns:
+        --------
+        scores: array
+            スコア配列
+        labels: array
+            ラベル配列（1: 優秀群, 0: 非優秀群）
+        """
+        scores = []
+        labels = []
+
+        # 優秀群のスコア
+        for member_code in excellent_members:
+            member_idx = self.member_to_idx.get(member_code)
+            if member_idx is not None:
+                distance = np.linalg.norm(self.embeddings[member_idx] - self.prototype)
+                max_distance = np.max([np.linalg.norm(emb - self.prototype) for emb in self.embeddings])
+                score = (1 - distance / max_distance) * 100
+
+                scores.append(score)
+                labels.append(1)
+
+        # 非優秀群のスコア
+        non_excellent_members = [m for m in self.members if m not in excellent_members]
+        for member_code in non_excellent_members:
+            member_idx = self.member_to_idx.get(member_code)
+            if member_idx is not None:
+                distance = np.linalg.norm(self.embeddings[member_idx] - self.prototype)
+                max_distance = np.max([np.linalg.norm(emb - self.prototype) for emb in self.embeddings])
+                score = (1 - distance / max_distance) * 100
+
+                scores.append(score)
+                labels.append(0)
+
+        return np.array(scores), np.array(labels)
+
+    def _calculate_metrics(self, scores, labels, dataset_name=""):
+        """
+        評価メトリクスを計算
+
+        Parameters:
+        -----------
+        scores: array
+            予測スコア
+        labels: array
+            真のラベル
+        dataset_name: str
+            データセット名（ロギング用）
+
+        Returns:
+        --------
+        metrics: dict
+            評価メトリクス
+        """
+        metrics = {}
+
+        # 閾値を決定（スコアの中央値を使用）
+        threshold = np.median(scores)
+
+        # 予測ラベル
+        predictions = (scores >= threshold).astype(int)
+
+        try:
+            # AUC
+            if len(np.unique(labels)) > 1:
+                auc = roc_auc_score(labels, scores)
+                metrics['auc'] = auc
+            else:
+                metrics['auc'] = 0.0
+                logger.warning(f"{dataset_name}: ラベルが1種類のみのため、AUCを計算できません")
+
+            # Precision, Recall, F1
+            precision = precision_score(labels, predictions, zero_division=0)
+            recall = recall_score(labels, predictions, zero_division=0)
+            f1 = f1_score(labels, predictions, zero_division=0)
+
+            metrics['precision'] = precision
+            metrics['recall'] = recall
+            metrics['f1'] = f1
+            metrics['threshold'] = threshold
+
+            logger.info(f"{dataset_name} - AUC: {metrics.get('auc', 0):.3f}, "
+                       f"Precision: {precision:.3f}, Recall: {recall:.3f}, F1: {f1:.3f}")
+
+        except Exception as e:
+            logger.error(f"メトリクス計算エラー: {str(e)}")
+            metrics = {'auc': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0}
+
+        return metrics
+
+    def save_model(self, excellent_members, version=None):
+        """
+        学習済みモデルを保存
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        version: str, optional
+            バージョン名
+        """
+        versioning_config = get_config('versioning', {})
+
+        if not versioning_config.get('enabled', True) or not versioning_config.get('save_models', True):
+            logger.info("モデル保存が無効になっています")
+            return
+
+        model_dir = Path(versioning_config.get('model_dir', './models'))
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        # バージョン名の生成
+        if version is None:
+            version = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        model_path = model_dir / f"model_{version}.pkl"
+
+        # 保存するデータ
+        model_data = {
+            'version': version,
+            'timestamp': datetime.now().isoformat(),
+            'weights': self.gnn.weights,
+            'embeddings': self.embeddings,
+            'prototype': self.prototype,
+            'scaler': self.scaler,
+            'member_to_idx': self.member_to_idx,
+            'skill_codes': self.skill_codes,
+            'skill_names': self.skill_names
+        }
+
+        # メタデータの追加
+        if versioning_config.get('include_metadata', True):
+            model_data['metadata'] = {
+                'n_members': len(self.members),
+                'n_skills': len(self.skill_codes),
+                'n_excellent': len(excellent_members),
+                'excellent_members': excellent_members,
+                'model_params': {
+                    'n_layers': self.gnn.n_layers,
+                    'hidden_dim': self.gnn.hidden_dim,
+                    'dropout': self.gnn.dropout,
+                    'learning_rate': self.gnn.learning_rate
+                }
+            }
+
+        # 保存
+        with open(model_path, 'wb') as f:
+            pickle.dump(model_data, f)
+
+        logger.info(f"モデルを保存しました: {model_path}")
+
+        # メタデータをJSONでも保存
+        metadata_path = model_dir / f"model_{version}_metadata.json"
+        with open(metadata_path, 'w', encoding='utf-8') as f:
+            json.dump(model_data.get('metadata', {}), f, ensure_ascii=False, indent=2)
+
+    def load_model(self, version):
+        """
+        学習済みモデルを読み込み
+
+        Parameters:
+        -----------
+        version: str
+            バージョン名
+        """
+        model_dir = Path(get_config('versioning.model_dir', './models'))
+        model_path = model_dir / f"model_{version}.pkl"
+
+        if not model_path.exists():
+            logger.error(f"モデルファイルが見つかりません: {model_path}")
+            return False
+
+        try:
+            with open(model_path, 'rb') as f:
+                model_data = pickle.load(f)
+
+            self.gnn.weights = model_data['weights']
+            self.embeddings = model_data['embeddings']
+            self.prototype = model_data['prototype']
+            self.scaler = model_data['scaler']
+            self.member_to_idx = model_data['member_to_idx']
+            self.skill_codes = model_data['skill_codes']
+            self.skill_names = model_data['skill_names']
+
+            logger.info(f"モデルを読み込みました: {model_path}")
+            logger.info(f"バージョン: {model_data.get('version')}, タイムスタンプ: {model_data.get('timestamp')}")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"モデル読み込みエラー: {str(e)}")
+            return False
 
 
 def load_csv_files(member_path, acquired_path, skill_path, education_path, license_path):

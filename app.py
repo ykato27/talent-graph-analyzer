@@ -47,6 +47,8 @@ if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 if 'results' not in st.session_state:
     st.session_state.results = None
+if 'evaluation_results' not in st.session_state:
+    st.session_state.evaluation_results = None
 if 'member_df' not in st.session_state:
     st.session_state.member_df = None
 
@@ -206,6 +208,20 @@ if st.session_state.data_loaded:
                 results = analyzer.analyze(selected_members)
                 st.session_state.results = results
 
+                # モデル評価
+                eval_config = get_config('evaluation', {})
+                if eval_config.get('enabled', True):
+                    with st.spinner("モデル評価を実行中..."):
+                        evaluation_results = analyzer.evaluate_model(selected_members, epochs_unsupervised=epochs)
+                        st.session_state.evaluation_results = evaluation_results
+                else:
+                    st.session_state.evaluation_results = None
+
+                # モデル保存
+                versioning_config = get_config('versioning', {})
+                if versioning_config.get('enabled', True) and versioning_config.get('save_models', True):
+                    analyzer.save_model(selected_members)
+
             st.success("✅ 分析完了！")
         except Exception as e:
             st.error(f"❌ エラーが発生しました: {str(e)}")
@@ -233,12 +249,23 @@ if st.session_state.data_loaded:
                 st.metric("優秀群比率", f"{coverage:.1f}%")
 
         # タブで結果を分割表示
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tabs = [
             "🎯 重要スキルランキング",
             "👥 社員スコアランキング",
             "📊 スキル比較分析",
             "🗺️ 埋め込み可視化"
-        ])
+        ]
+
+        # モデル性能タブを条件付きで追加
+        if st.session_state.evaluation_results is not None:
+            tabs.append("📈 モデル性能")
+
+        tab_objects = st.tabs(tabs)
+        tab1 = tab_objects[0]
+        tab2 = tab_objects[1]
+        tab3 = tab_objects[2]
+        tab4 = tab_objects[3]
+        tab5 = tab_objects[4] if len(tab_objects) > 4 else None
 
         with tab1:
             st.subheader(f"優秀群に特徴的なスキル Top{MAX_EXCELLENT_RECOMMENDED}")
@@ -252,10 +279,28 @@ if st.session_state.data_loaded:
             skill_df_display['差分'] = skill_df_display['rate_diff'].apply(lambda x: f"+{x*100:.1f}%" if x > 0 else f"{x*100:.1f}%")
             skill_df_display['重要度'] = skill_df_display['importance_score'].apply(lambda x: f"{x:.3f}")
 
+            # 統計的有意性を追加
+            if 'p_adjusted' in skill_df.columns and 'significance_level' in skill_df.columns:
+                skill_df_display['有意性'] = skill_df_display['significance_level']
+                skill_df_display['p値'] = skill_df_display['p_adjusted'].apply(lambda x: f"{x:.4f}" if pd.notna(x) else "N/A")
+                columns_to_show = ['skill_name', '優秀群保有率', '非優秀群保有率', '差分', '重要度', '有意性', 'p値']
+            else:
+                columns_to_show = ['skill_name', '優秀群保有率', '非優秀群保有率', '差分', '重要度']
+
             st.dataframe(
-                skill_df_display[['skill_name', '優秀群保有率', '非優秀群保有率', '差分', '重要度']],
+                skill_df_display[columns_to_show],
                 use_container_width=True
             )
+
+            # 有意性に関する説明を表示
+            if 'significance_level' in skill_df.columns:
+                st.info("""
+                **有意性マーク**:
+                - *** : p < 0.001（非常に高い有意性）
+                - ** : p < 0.01（高い有意性）
+                - * : p < 0.05（有意）
+                - n.s. : 有意差なし
+                """)
 
             # 棒グラフ
             fig = go.Figure()
@@ -464,6 +509,97 @@ if st.session_state.data_loaded:
             - 近い位置にある社員は似たスキルプロファイルを持つ
             - 優秀群が集まっている領域が「優秀な人材の特徴空間」
             """)
+
+        # モデル性能タブ
+        if tab5 is not None:
+            with tab5:
+                st.subheader("モデル性能評価")
+
+                evaluation_results = st.session_state.evaluation_results
+
+                if evaluation_results is None:
+                    st.info("モデル評価が実行されていません")
+                else:
+                    method = evaluation_results.get('method', 'unknown')
+
+                    if method == 'holdout':
+                        st.markdown("### Holdout法による評価")
+
+                        col1, col2 = st.columns(2)
+
+                        with col1:
+                            st.markdown("#### 訓練データ")
+                            train_metrics = evaluation_results.get('train_metrics', {})
+                            st.metric("AUC", f"{train_metrics.get('auc', 0):.3f}")
+                            st.metric("Precision", f"{train_metrics.get('precision', 0):.3f}")
+                            st.metric("Recall", f"{train_metrics.get('recall', 0):.3f}")
+                            st.metric("F1スコア", f"{train_metrics.get('f1', 0):.3f}")
+                            st.metric("サンプル数", f"{evaluation_results.get('n_train', 0)}名")
+
+                        with col2:
+                            st.markdown("#### テストデータ")
+                            test_metrics = evaluation_results.get('test_metrics', {})
+                            st.metric("AUC", f"{test_metrics.get('auc', 0):.3f}")
+                            st.metric("Precision", f"{test_metrics.get('precision', 0):.3f}")
+                            st.metric("Recall", f"{test_metrics.get('recall', 0):.3f}")
+                            st.metric("F1スコア", f"{test_metrics.get('f1', 0):.3f}")
+                            st.metric("サンプル数", f"{evaluation_results.get('n_test', 0)}名")
+
+                        # 過学習の警告
+                        if evaluation_results.get('is_overfitting', False):
+                            st.warning(f"""
+                            ⚠️ **過学習の可能性があります**
+
+                            訓練データとテストデータのAUC差分が{evaluation_results.get('auc_diff', 0):.3f}と大きいため、
+                            モデルが訓練データに過適合している可能性があります。
+
+                            **改善案:**
+                            - 優秀群の人数を増やす
+                            - 学習エポック数を減らす
+                            - ドロップアウト率を上げる（config.yamlで設定）
+                            """)
+                        else:
+                            st.success("✅ 過学習の兆候は見られません")
+
+                    elif method == 'loocv':
+                        st.markdown("### LOOCV（Leave-One-Out Cross-Validation）による評価")
+
+                        metrics = evaluation_results.get('metrics', {})
+
+                        col1, col2, col3, col4 = st.columns(4)
+
+                        with col1:
+                            st.metric("AUC", f"{metrics.get('auc', 0):.3f}")
+                        with col2:
+                            st.metric("Precision", f"{metrics.get('precision', 0):.3f}")
+                        with col3:
+                            st.metric("Recall", f"{metrics.get('recall', 0):.3f}")
+                        with col4:
+                            st.metric("F1スコア", f"{metrics.get('f1', 0):.3f}")
+
+                        st.info(f"交差検証数: {evaluation_results.get('n_folds', 0)}回（Leave-One-Out）")
+
+                    # メトリクスの解釈ガイド
+                    with st.expander("📘 評価指標の解釈ガイド"):
+                        st.markdown("""
+                        **AUC (Area Under the ROC Curve)**
+                        - 0.5: ランダム（性能なし）
+                        - 0.7-0.8: まあまあ
+                        - 0.8-0.9: 良好
+                        - 0.9以上: 優秀
+
+                        **Precision（精度）**
+                        - 優秀と予測した中で、実際に優秀だった割合
+                        - 高いほど誤検出が少ない
+
+                        **Recall（再現率）**
+                        - 実際の優秀群のうち、正しく検出できた割合
+                        - 高いほど見逃しが少ない
+
+                        **F1スコア**
+                        - PrecisionとRecallの調和平均
+                        - バランスの取れた指標
+                        """)
 
         # 推奨育成プラン
         st.markdown("---")
