@@ -51,12 +51,16 @@ env/
 *.xls
 !example_data/*.csv
 
-# Model files
+# Model files and directories
 *.pkl
 *.pickle
 *.h5
 *.pth
 *.pt
+models/
+*.json
+!config.yaml
+!package.json
 
 # Logs
 *.log
