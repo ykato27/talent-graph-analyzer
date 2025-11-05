@@ -27,6 +27,9 @@ Graph Neural Network (GNN)を用いた優秀人材の特徴抽出・分析シス
 # 必要なパッケージのインストール
 pip install -r requirements.txt
 
+# Streamlit アプリの起動
+streamlit run app.py
+
 # 環境変数の設定（オプション）
 cp .env.example .env
 # 必要に応じて .env を編集
