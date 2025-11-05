@@ -204,45 +204,55 @@ if st.session_state.data_loaded:
 
     if st.button("🚀 分析開始", type="primary", disabled=(len(selected_members) < MIN_EXCELLENT)):
         try:
-            with st.spinner("GNNモデルの学習と分析を実行中..."):
-                # 学習
+            # 学習実行
+            with st.spinner("GNNモデルの学習中..."):
                 analyzer.train(selected_members, epochs_unsupervised=epochs)
 
-                # 基本分析
+            # 学習時間情報を表示
+            if analyzer.gnn.last_training_time is not None:
+                training_time_seconds = analyzer.gnn.last_training_time
+                if training_time_seconds < 60:
+                    time_str = f"{training_time_seconds:.1f}秒"
+                else:
+                    time_str = f"{training_time_seconds/60:.1f}分"
+                st.info(f"📊 GNN学習完了 - 学習時間: {time_str}")
+
+            # 基本分析
+            with st.spinner("分析実行中..."):
                 results = analyzer.analyze(selected_members)
                 st.session_state.results = results
 
-                # モデル評価
-                eval_config = get_config('evaluation', {})
-                if eval_config.get('enabled', True):
-                    with st.spinner("モデル評価を実行中..."):
-                        evaluation_results = analyzer.evaluate_model(selected_members, epochs_unsupervised=epochs)
-                        st.session_state.evaluation_results = evaluation_results
-                else:
-                    st.session_state.evaluation_results = None
+            # モデル評価
+            eval_config = get_config('evaluation', {})
+            if eval_config.get('enabled', True):
+                with st.spinner("モデル評価を実行中..."):
+                    evaluation_results = analyzer.evaluate_model(selected_members, epochs_unsupervised=epochs)
+                    st.session_state.evaluation_results = evaluation_results
+            else:
+                st.session_state.evaluation_results = None
 
-                # 因果推論
-                causal_config = get_config('causal_inference', {})
-                if causal_config.get('enabled', True):
-                    with st.spinner("因果推論を実行中..."):
-                        causal_results = analyzer.estimate_causal_effects(selected_members)
-                        st.session_state.causal_results = causal_results
-                else:
-                    st.session_state.causal_results = None
+            # 因果推論
+            causal_config = get_config('causal_inference', {})
+            if causal_config.get('enabled', True):
+                with st.spinner("因果推論を実行中..."):
+                    causal_results = analyzer.estimate_causal_effects(selected_members)
+                    st.session_state.causal_results = causal_results
+            else:
+                st.session_state.causal_results = None
 
-                # スキル相互作用分析
-                interaction_config = get_config('skill_interaction', {})
-                if interaction_config.get('enabled', True):
-                    with st.spinner("スキル相互作用を分析中..."):
-                        interaction_results = analyzer.analyze_skill_interactions(selected_members)
-                        st.session_state.interaction_results = interaction_results
-                else:
-                    st.session_state.interaction_results = None
+            # スキル相互作用分析
+            interaction_config = get_config('skill_interaction', {})
+            if interaction_config.get('enabled', True):
+                with st.spinner("スキル相互作用を分析中..."):
+                    interaction_results = analyzer.analyze_skill_interactions(selected_members)
+                    st.session_state.interaction_results = interaction_results
+            else:
+                st.session_state.interaction_results = None
 
-                # モデル保存
-                versioning_config = get_config('versioning', {})
-                if versioning_config.get('enabled', True) and versioning_config.get('save_models', True):
-                    analyzer.save_model(selected_members)
+            # モデル保存
+            versioning_config = get_config('versioning', {})
+            if versioning_config.get('enabled', True) and versioning_config.get('save_models', True):
+                analyzer.save_model(selected_members)
 
             st.success("✅ 分析完了！")
         except Exception as e:

@@ -17,9 +17,11 @@ import logging
 import os
 import pickle
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from config_loader import get_config
+from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
@@ -79,6 +81,7 @@ class SimpleGNN:
 
         self.weights = []
         self.trained = False
+        self.last_training_time = None  # 最後の学習時間を保存
 
     def build_graph(self, member_features, skill_matrix, member_attrs):
         """
@@ -196,7 +199,16 @@ class SimpleGNN:
         best_loss = float('inf')
         patience_counter = 0
 
-        for epoch in range(epochs):
+        # 学習時間の計測開始
+        training_start_time = time.time()
+        epoch_times = []
+
+        # プログレスバーを使用した学習ループ
+        pbar = tqdm(range(epochs), desc="GNN学習中", unit="epoch", ncols=100)
+
+        for epoch in pbar:
+            epoch_start_time = time.time()
+
             # 順伝播
             embeddings = self.forward(adjacency, features)
 
@@ -246,8 +258,28 @@ class SimpleGNN:
                 if new_loss >= loss:
                     self.weights[i] = old_weight
 
-            if epoch % 20 == 0:
-                print(f"Epoch {epoch}/{epochs}, Loss: {loss:.4f}")
+            # エポック終了時刻を記録
+            epoch_end_time = time.time()
+            epoch_time = epoch_end_time - epoch_start_time
+            epoch_times.append(epoch_time)
+
+            # 経過時間と推定完了時間を計算
+            elapsed_time = epoch_end_time - training_start_time
+            if epoch > 0:
+                avg_epoch_time = np.mean(epoch_times)
+                remaining_epochs = epochs - epoch - 1
+                estimated_remaining_time = avg_epoch_time * remaining_epochs
+                estimated_total_time = elapsed_time + estimated_remaining_time
+
+                # プログレスバーにメタ情報を追加
+                pbar.set_postfix({
+                    'Loss': f'{loss:.4f}',
+                    '経過': self._format_time(elapsed_time),
+                    '推定残り': self._format_time(estimated_remaining_time),
+                    '推定合計': self._format_time(estimated_total_time)
+                })
+            else:
+                pbar.set_postfix({'Loss': f'{loss:.4f}'})
 
             # Early stopping
             if loss < best_loss:
@@ -257,12 +289,41 @@ class SimpleGNN:
                 patience_counter += 1
 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}")
+                print(f"\nEarly stopping at epoch {epoch}")
                 break
 
+        pbar.close()
+
+        # 学習完了メッセージ
+        total_training_time = time.time() - training_start_time
+        self.last_training_time = total_training_time  # 学習時間を保存
+        print(f"\n事前学習完了 - 総学習時間: {self._format_time(total_training_time)}")
+
         self.trained = True
-        print("事前学習完了")
         return self
+
+    def _format_time(self, seconds):
+        """
+        秒数を人間が読みやすい形式にフォーマット
+
+        Parameters:
+        -----------
+        seconds: float
+            秒数
+
+        Returns:
+        --------
+        formatted_time: str
+            フォーマットされた時間文字列
+        """
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        elif seconds < 3600:
+            minutes = seconds / 60
+            return f"{minutes:.1f}m"
+        else:
+            hours = seconds / 3600
+            return f"{hours:.1f}h"
 
     def get_embeddings(self, adjacency, features):
         """
