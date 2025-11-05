@@ -1231,11 +1231,13 @@ class TalentAnalyzer:
                 causal_results.append(result)
 
         # 因果効果の大きい順にソート
-        causal_results.sort(key=lambda x: abs(x.get('causal_effect', 0)), reverse=True)
+        # causal_effectがNoneでない結果のみを対象
+        valid_causal_results = [r for r in causal_results if r.get('causal_effect') is not None]
+        valid_causal_results.sort(key=lambda x: abs(x.get('causal_effect')), reverse=True)
 
-        logger.info(f"因果推論完了: {len(causal_results)}個のスキルを分析")
+        logger.info(f"因果推論完了: {len(valid_causal_results)}個のスキルを分析")
 
-        return causal_results
+        return valid_causal_results
 
     def _get_confounders(self):
         """
