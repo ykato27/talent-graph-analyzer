@@ -23,14 +23,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 # モジュール化されたコンポーネントのインポート
-from ..config.loader import get_config
-from ..utils import setup_logging, load_csv_files, get_logger, format_time, ensure_dir_exists
-from ..config import (
+from talent_analyzer.config.loader import get_config
+from talent_analyzer.utils import setup_logging, load_csv_files, get_logger, format_time, ensure_dir_exists
+from talent_analyzer.config import (
     ModelConfig, TrainingConfig, StatisticalConfig,
     CausalInferenceConfig, SkillInteractionConfig, NumericalConfig,
     AnalysisConfig
 )
-from .gnn_models import SimpleGNN
+from talent_analyzer.core.gnn_models import SimpleGNN
 
 warnings.filterwarnings('ignore')
 

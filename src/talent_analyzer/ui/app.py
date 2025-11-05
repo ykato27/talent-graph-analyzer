@@ -7,8 +7,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from ..core.analyzer import TalentAnalyzer
-from ..config.loader import get_config
+from talent_analyzer.core.analyzer import TalentAnalyzer
+from talent_analyzer.config.loader import get_config
 
 # ページ設定
 st.set_page_config(

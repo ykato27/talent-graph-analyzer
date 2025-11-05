@@ -8,9 +8,9 @@ CPU最適化版のGraphSAGEベースハイブリッドGNNです。
 import numpy as np
 import time
 from tqdm import tqdm
-from ..utils import get_logger, format_time
-from ..config import ModelConfig, TrainingConfig, NumericalConfig
-from ..config.loader import get_config
+from talent_analyzer.utils import get_logger, format_time
+from talent_analyzer.config import ModelConfig, TrainingConfig, NumericalConfig
+from talent_analyzer.config.loader import get_config
 
 
 logger = get_logger(__name__)

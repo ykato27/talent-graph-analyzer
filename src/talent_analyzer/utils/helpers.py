@@ -9,7 +9,7 @@ import logging
 import pandas as pd
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from ..config.loader import get_config
+from talent_analyzer.config.loader import get_config
 
 
 def setup_logging():

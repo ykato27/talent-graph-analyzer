@@ -5,7 +5,7 @@ GNNベース優秀人材分析システムで使用されるすべての定数�
 config.yaml から設定値を読み込み、デフォルト値をここで定義します。
 """
 
-from config_loader import get_config
+from .loader import get_config
 
 
 class ModelConfig:

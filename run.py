@@ -9,13 +9,15 @@ GNN優秀人材分析システム - Streamlit エントリーポイント
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 def main():
     """Streamlit アプリケーションを起動"""
     # プロジェクトルートを取得
     project_root = Path(__file__).parent
-    app_path = project_root / "src" / "talent_analyzer" / "ui" / "app.py"
+    src_dir = project_root / "src"
+    app_path = src_dir / "talent_analyzer" / "ui" / "app.py"
 
     if not app_path.exists():
         print(f"エラー: app.py が見つかりません: {app_path}")
@@ -23,9 +25,14 @@ def main():
 
     # Streamlit を起動
     try:
+        # PYTHONPATH に src/ ディレクトリを追加
+        env = os.environ.copy()
+        env["PYTHONPATH"] = f"{src_dir}{os.pathsep}{env.get('PYTHONPATH', '')}"
+
         subprocess.run(
             [sys.executable, "-m", "streamlit", "run", str(app_path)],
-            cwd=str(project_root)
+            cwd=str(project_root),
+            env=env
         )
     except FileNotFoundError:
         print("エラー: streamlit がインストールされていません")
