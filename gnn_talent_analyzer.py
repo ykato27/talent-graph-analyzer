@@ -25,6 +25,23 @@ from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
+# ==================== カスタム例外クラス ====================
+class TalentAnalyzerError(Exception):
+    """タレント分析システムの基底例外"""
+    pass
+
+class DataLoadError(TalentAnalyzerError):
+    """データ読み込みエラー"""
+    pass
+
+class ModelTrainingError(TalentAnalyzerError):
+    """モデル学習エラー"""
+    pass
+
+class AnalysisError(TalentAnalyzerError):
+    """分析実行エラー"""
+    pass
+
 # ==================== 定数定義 ====================
 # GNNモデルのデフォルトパラメータ
 DEFAULT_N_LAYERS = 3
@@ -395,7 +412,19 @@ class SimpleGNN:
 
     def get_embeddings(self, adjacency, features):
         """
-        ノードの埋め込み表現を取得
+        学習済みモデルからノードの埋め込み表現を取得
+
+        Parameters:
+        -----------
+        adjacency: array-like, shape (n_nodes, n_nodes)
+            グラフの隣接行列
+        features: array-like, shape (n_nodes, n_features)
+            ノードの特徴量
+
+        Returns:
+        --------
+        embeddings: array, shape (n_nodes, hidden_dim)
+            ノードの埋め込み表現（特徴量ベクトル）
         """
         self.training = False
         return self.forward(adjacency, features)
