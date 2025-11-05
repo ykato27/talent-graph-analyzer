@@ -113,6 +113,8 @@ skill_interaction:
   enabled: true
   synergy_threshold: 0.1  # 相乗効果の閾値（10%以上）
   min_both_rate: 0.7  # 両方保有時の最低優秀率
+  min_group_size: 3  # グループの最小人数
+  min_skill_samples: 5  # スキル保有者の最小数
   max_pairs_to_analyze: 1000  # 分析する組み合わせの上限（計算時間削減）
   show_in_ui: true
 
@@ -152,3 +154,7 @@ logging:
   max_bytes: 10485760  # 10MB
   backup_count: 5
   console_logging: true
+
+# 数値計算の設定
+numerical:
+  epsilon: 1.0e-8  # ゼロ除算防止用の小さな値
