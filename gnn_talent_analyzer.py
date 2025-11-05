@@ -1235,6 +1235,96 @@ class TalentAnalyzer:
 
         return np.array(confounders)
 
+    def _diagnose_propensity_scores(self, propensity_scores, has_skill, confounders):
+        """
+        傾向スコアの診断：Positivity と Overlap の仮定をチェック
+
+        Parameters:
+        -----------
+        propensity_scores: array
+            各個体の傾向スコア
+        has_skill: array
+            スキル保有フラグ（0 or 1）
+        confounders: array
+            交絡因子の行列
+
+        Returns:
+        --------
+        diagnostics: dict
+            診断結果
+        """
+        treated_ps = propensity_scores[has_skill == 1]
+        control_ps = propensity_scores[has_skill == 0]
+
+        diagnostics = {
+            'positivity_violations': 0,
+            'overlap_ratio': 0,
+            'mean_smd': 0,
+            'warnings': []
+        }
+
+        # 1. Positivity（全体的なサポート）チェック
+        ps_min_treated = treated_ps.min()
+        ps_max_treated = treated_ps.max()
+        ps_min_control = control_ps.min()
+        ps_max_control = control_ps.max()
+
+        # Overlap 範囲を計算
+        overlap_min = max(ps_min_treated, ps_min_control)
+        overlap_max = min(ps_max_treated, ps_max_control)
+
+        if overlap_min >= overlap_max:
+            diagnostics['warnings'].append(
+                "⚠️ CRITICAL: 傾向スコアに重複がありません（common support 違反）"
+            )
+            diagnostics['positivity_violations'] = max(len(treated_ps), len(control_ps))
+        else:
+            # Overlap 比率
+            in_overlap_treated = ((treated_ps >= overlap_min) & (treated_ps <= overlap_max)).sum()
+            in_overlap_control = ((control_ps >= overlap_min) & (control_ps <= overlap_max)).sum()
+            overlap_ratio = min(in_overlap_treated / len(treated_ps), in_overlap_control / len(control_ps))
+
+            diagnostics['overlap_ratio'] = overlap_ratio
+
+            if overlap_ratio < 0.8:
+                diagnostics['warnings'].append(
+                    f"⚠️ WARNING: Overlap が低い（{overlap_ratio:.1%}）"
+                    f"→ マッチング品質が低下"
+                )
+
+        # 2. Standardized Mean Difference (SMD) を計算
+        smd_list = []
+
+        for j in range(confounders.shape[1]):
+            mean_treated = confounders[has_skill == 1, j].mean()
+            mean_control = confounders[has_skill == 0, j].mean()
+            var_treated = confounders[has_skill == 1, j].var()
+            var_control = confounders[has_skill == 0, j].var()
+
+            pooled_var = (var_treated + var_control) / 2
+            if pooled_var > 0:
+                smd = (mean_treated - mean_control) / np.sqrt(pooled_var)
+                smd_list.append(abs(smd))
+
+        if smd_list:
+            diagnostics['mean_smd'] = np.mean(smd_list)
+
+            if diagnostics['mean_smd'] > 0.1:
+                diagnostics['warnings'].append(
+                    f"⚠️ WARNING: 共変量の非バランス（平均SMD={diagnostics['mean_smd']:.3f}）"
+                    f"→ マッチング後も調整が必要"
+                )
+
+        # 3. ログに出力
+        if diagnostics['warnings']:
+            logger.warning("傾向スコア診断結果:")
+            for warning in diagnostics['warnings']:
+                logger.warning(f"  {warning}")
+        else:
+            logger.info("✓ 傾向スコア診断: 問題なし")
+
+        return diagnostics
+
     def _estimate_skill_causal_effect(self, skill_idx, excellent_indices, confounders, causal_config):
         """
         特定スキルの因果効果を推定
@@ -1270,6 +1360,9 @@ class TalentAnalyzer:
             ps_model = LogisticRegression(max_iter=1000, random_state=42)
             ps_model.fit(confounders, has_skill)
             propensity_scores = ps_model.predict_proba(confounders)[:, 1]
+
+            # 1.5. 傾向スコアの診断（Positivity と Overlap をチェック）
+            ps_diagnostics = self._diagnose_propensity_scores(propensity_scores, has_skill, confounders)
 
             # 2. 傾向スコアマッチング
             treated_indices = np.where(has_skill == 1)[0]
