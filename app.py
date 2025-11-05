@@ -204,21 +204,62 @@ if st.session_state.data_loaded:
 
     if st.button("🚀 分析開始", type="primary", disabled=(len(selected_members) < MIN_EXCELLENT)):
         try:
-            # 学習実行
-            with st.spinner("GNNモデルの学習中..."):
-                analyzer.train(selected_members, epochs_unsupervised=epochs)
+            # 学習実行用のプログレス表示UI
+            progress_placeholder = st.empty()
+            metrics_cols = st.columns(4)
+            epoch_metric = metrics_cols[0].empty()
+            loss_metric = metrics_cols[1].empty()
+            elapsed_metric = metrics_cols[2].empty()
+            remaining_metric = metrics_cols[3].empty()
 
-            # 学習時間情報を表示
-            try:
-                if hasattr(analyzer.gnn, 'last_training_time') and analyzer.gnn.last_training_time is not None:
-                    training_time_seconds = analyzer.gnn.last_training_time
-                    if training_time_seconds < 60:
-                        time_str = f"{training_time_seconds:.1f}秒"
+            def on_epoch_callback(epoch_info):
+                """各エポック終了時に呼び出されるコールバック関数"""
+                with progress_placeholder.container():
+                    # 進捗バー
+                    st.progress(epoch_info['progress'])
+
+                # メトリクスを更新
+                epoch_metric.metric(
+                    "エポック",
+                    f"{epoch_info['epoch']}/{epoch_info['epochs']}"
+                )
+                loss_metric.metric(
+                    "ロス",
+                    f"{epoch_info['loss']:.4f}"
+                )
+
+                # 時間をフォーマット
+                def format_time(seconds):
+                    if seconds < 60:
+                        return f"{seconds:.1f}秒"
+                    elif seconds < 3600:
+                        return f"{seconds/60:.1f}分"
                     else:
-                        time_str = f"{training_time_seconds/60:.1f}分"
-                    st.info(f"📊 GNN学習完了 - 学習時間: {time_str}")
-            except AttributeError as e:
-                st.warning(f"⚠️ 学習時間情報の取得に失敗しました: {str(e)}")
+                        return f"{seconds/3600:.1f}時"
+
+                elapsed_metric.metric(
+                    "経過時間",
+                    format_time(epoch_info['elapsed_time'])
+                )
+                remaining_metric.metric(
+                    "推定残り時間",
+                    format_time(epoch_info['estimated_remaining_time'])
+                )
+
+            # 学習実行（コールバック関数付き）
+            analyzer.train(selected_members, epochs_unsupervised=epochs, on_epoch_callback=on_epoch_callback)
+
+            # 学習完了メッセージ
+            progress_placeholder.empty()
+            if hasattr(analyzer.gnn, 'last_training_time') and analyzer.gnn.last_training_time is not None:
+                training_time_seconds = analyzer.gnn.last_training_time
+                if training_time_seconds < 60:
+                    time_str = f"{training_time_seconds:.1f}秒"
+                else:
+                    time_str = f"{training_time_seconds/60:.1f}分"
+                st.success(f"✅ GNN学習完了 - 総学習時間: {time_str}")
+            else:
+                st.success("✅ GNN学習完了")
 
             # 基本分析
             with st.spinner("分析実行中..."):

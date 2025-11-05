@@ -170,10 +170,22 @@ class SimpleGNN:
 
         return h
 
-    def fit_unsupervised(self, adjacency, features, epochs=None):
+    def fit_unsupervised(self, adjacency, features, epochs=None, on_epoch_callback=None):
         """
         半教師あり学習（ラベルなしで学習）
         Deep Graph Infomax的なアプローチ
+
+        Parameters:
+        -----------
+        adjacency: array-like
+            隣接行列
+        features: array-like
+            ノードの特徴量
+        epochs: int, optional
+            学習エポック数
+        on_epoch_callback: callable, optional
+            各エポック終了時に呼び出されるコールバック関数
+            epoch_info辞書を受け取る
         """
         if epochs is None:
             epochs = get_config('training.default_epochs', 100)
@@ -280,6 +292,31 @@ class SimpleGNN:
                 })
             else:
                 pbar.set_postfix({'Loss': f'{loss:.4f}'})
+
+            # コールバック関数を呼び出し（Streamlit等での進捗表示用）
+            if on_epoch_callback is not None:
+                if epoch > 0:
+                    avg_epoch_time = np.mean(epoch_times)
+                    remaining_epochs = epochs - epoch - 1
+                    estimated_remaining_time = avg_epoch_time * remaining_epochs
+                    estimated_total_time = elapsed_time + estimated_remaining_time
+                else:
+                    estimated_remaining_time = 0
+                    estimated_total_time = elapsed_time
+
+                epoch_info = {
+                    'epoch': epoch + 1,  # 1-indexed for display
+                    'epochs': epochs,
+                    'loss': float(loss),
+                    'elapsed_time': float(elapsed_time),
+                    'estimated_remaining_time': float(estimated_remaining_time),
+                    'estimated_total_time': float(estimated_total_time),
+                    'progress': (epoch + 1) / epochs
+                }
+                try:
+                    on_epoch_callback(epoch_info)
+                except Exception as e:
+                    logger.warning(f"コールバック関数エラー: {str(e)}")
 
             # Early stopping
             if loss < best_loss:
@@ -514,7 +551,7 @@ class TalentAnalyzer:
 
         self.member_features = np.array(features)
 
-    def train(self, excellent_members, epochs_unsupervised=None):
+    def train(self, excellent_members, epochs_unsupervised=None, on_epoch_callback=None):
         """
         モデルの学習
 
@@ -524,6 +561,8 @@ class TalentAnalyzer:
             優秀群の社員コードリスト
         epochs_unsupervised: int, optional
             学習エポック数
+        on_epoch_callback: callable, optional
+            各エポック終了時に呼び出されるコールバック関数
         """
         print(f"\n優秀群: {len(excellent_members)}名で学習開始")
 
@@ -540,7 +579,12 @@ class TalentAnalyzer:
         combined_features = self.scaler.fit_transform(combined_features)
 
         # 半教師あり学習
-        self.gnn.fit_unsupervised(adjacency, combined_features, epochs=epochs_unsupervised)
+        self.gnn.fit_unsupervised(
+            adjacency,
+            combined_features,
+            epochs=epochs_unsupervised,
+            on_epoch_callback=on_epoch_callback
+        )
 
         # 埋め込み表現の取得
         self.embeddings = self.gnn.get_embeddings(adjacency, combined_features)
