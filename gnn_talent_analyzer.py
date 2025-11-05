@@ -25,7 +25,38 @@ from tqdm import tqdm
 
 warnings.filterwarnings('ignore')
 
-# ロギング設定
+# ==================== 定数定義 ====================
+# GNNモデルのデフォルトパラメータ
+DEFAULT_N_LAYERS = 3
+DEFAULT_HIDDEN_DIM = 128
+DEFAULT_DROPOUT = 0.3
+DEFAULT_LEARNING_RATE = 0.01
+DEFAULT_K_NEIGHBORS = 10
+
+# 学習パラメータ
+DEFAULT_EPOCHS = 100
+EARLY_STOPPING_PATIENCE = 20
+BATCH_SIZE_EDGES = 1000
+
+# 統計的検定
+SIGNIFICANCE_LEVEL = 0.05
+CONFIDENCE_LEVEL = 0.95
+
+# 因果推論
+PROPENSITY_SCORE_CALIPER = 0.1
+MIN_MATCHED_PAIRS = 5
+MIN_SKILL_SAMPLES = 5  # スキル保有者の最小数
+
+# スキル相互作用
+SYNERGY_THRESHOLD = 0.1
+MIN_BOTH_RATE = 0.7
+MIN_GROUP_SIZE = 3  # グループの最小人数
+
+# 数値精度
+EPSILON = 1e-8  # ゼロ除算防止用の小さな値
+
+# ==================== ロギング設定 ====================
+
 def setup_logging():
     """ロギングの設定"""
     log_config = get_config('logging', {})
@@ -73,11 +104,11 @@ class SimpleGNN:
 
     def __init__(self, n_layers=None, hidden_dim=None, dropout=None, learning_rate=None):
         # 設定ファイルから読み込む、引数があればそれを優先
-        self.n_layers = n_layers or get_config('model.n_layers', 3)
-        self.hidden_dim = hidden_dim or get_config('model.hidden_dim', 128)
-        self.dropout = dropout or get_config('model.dropout', 0.3)
-        self.learning_rate = learning_rate or get_config('model.learning_rate', 0.01)
-        self.k_neighbors = get_config('model.k_neighbors', 10)
+        self.n_layers = n_layers or get_config('model.n_layers', DEFAULT_N_LAYERS)
+        self.hidden_dim = hidden_dim or get_config('model.hidden_dim', DEFAULT_HIDDEN_DIM)
+        self.dropout = dropout or get_config('model.dropout', DEFAULT_DROPOUT)
+        self.learning_rate = learning_rate or get_config('model.learning_rate', DEFAULT_LEARNING_RATE)
+        self.k_neighbors = get_config('model.k_neighbors', DEFAULT_K_NEIGHBORS)
 
         self.weights = []
         self.trained = False
@@ -188,15 +219,15 @@ class SimpleGNN:
             epoch_info辞書を受け取る
         """
         if epochs is None:
-            epochs = get_config('training.default_epochs', 100)
+            epochs = get_config('training.default_epochs', DEFAULT_EPOCHS)
 
         print("半教師あり事前学習を開始...")
         self.training = True
         n_nodes = features.shape[0]
 
         # 設定から値を取得
-        patience = get_config('training.early_stopping_patience', 20)
-        batch_size_edges = get_config('training.batch_size_edges', 1000)
+        patience = get_config('training.early_stopping_patience', EARLY_STOPPING_PATIENCE)
+        batch_size_edges = get_config('training.batch_size_edges', BATCH_SIZE_EDGES)
 
         # 重みの初期化
         self.weights = []
@@ -241,8 +272,8 @@ class SimpleGNN:
             neg_scores = np.sum(neg_u * neg_v, axis=1)
 
             # 対照学習損失
-            loss = -np.mean(np.log(1 / (1 + np.exp(-pos_scores)) + 1e-8)) - \
-                   np.mean(np.log(1 - 1 / (1 + np.exp(-neg_scores)) + 1e-8))
+            loss = -np.mean(np.log(1 / (1 + np.exp(-pos_scores)) + EPSILON)) - \
+                   np.mean(np.log(1 - 1 / (1 + np.exp(-neg_scores)) + EPSILON))
 
             # 重み更新（簡易的な勾配降下）
             for i, weight in enumerate(self.weights):
@@ -263,8 +294,8 @@ class SimpleGNN:
                 neg_v_new = new_embeddings[neg_v_idx]
                 neg_scores_new = np.sum(neg_u_new * neg_v_new, axis=1)
 
-                new_loss = -np.mean(np.log(1 / (1 + np.exp(-pos_scores_new)) + 1e-8)) - \
-                           np.mean(np.log(1 - 1 / (1 + np.exp(-neg_scores_new)) + 1e-8))
+                new_loss = -np.mean(np.log(1 / (1 + np.exp(-pos_scores_new)) + EPSILON)) - \
+                           np.mean(np.log(1 - 1 / (1 + np.exp(-neg_scores_new)) + EPSILON))
 
                 # 損失が改善しなければ元に戻す
                 if new_loss >= loss:
@@ -712,10 +743,10 @@ class TalentAnalyzer:
 
         # 設定を取得
         test_config = get_config('statistical_tests', {})
-        alpha = test_config.get('significance_level', 0.05)
+        alpha = test_config.get('significance_level', SIGNIFICANCE_LEVEL)
         correction_method = test_config.get('multiple_testing_correction', 'fdr_bh')
         show_ci = test_config.get('show_confidence_intervals', True)
-        ci_level = test_config.get('confidence_level', 0.95)
+        ci_level = test_config.get('confidence_level', CONFIDENCE_LEVEL)
 
         p_values = []
 
@@ -1302,7 +1333,7 @@ class TalentAnalyzer:
         has_skill = (self.skill_matrix[:, skill_idx] > 0).astype(int)
 
         # スキル保有者が少なすぎる場合はスキップ
-        if has_skill.sum() < 5 or has_skill.sum() > len(has_skill) - 5:
+        if has_skill.sum() < MIN_SKILL_SAMPLES or has_skill.sum() > len(has_skill) - MIN_SKILL_SAMPLES:
             return None
 
         try:
@@ -1315,7 +1346,7 @@ class TalentAnalyzer:
             treated_indices = np.where(has_skill == 1)[0]
             control_indices = np.where(has_skill == 0)[0]
 
-            caliper = causal_config.get('propensity_score', {}).get('caliper', 0.1)
+            caliper = causal_config.get('propensity_score', {}).get('caliper', PROPENSITY_SCORE_CALIPER)
             matched_pairs = []
 
             for treated_idx in treated_indices:
@@ -1331,7 +1362,7 @@ class TalentAnalyzer:
                     matched_control = control_indices[min_diff_idx]
                     matched_pairs.append((treated_idx, matched_control))
 
-            min_pairs = causal_config.get('propensity_score', {}).get('min_matched_pairs', 5)
+            min_pairs = causal_config.get('propensity_score', {}).get('min_matched_pairs', MIN_MATCHED_PAIRS)
 
             if len(matched_pairs) < min_pairs:
                 return {
@@ -1507,7 +1538,7 @@ class TalentAnalyzer:
         both = (has_a == 1) & (has_b == 1)
 
         # 各グループの人数が少なすぎる場合はスキップ
-        if neither.sum() < 3 or both.sum() < 3:
+        if neither.sum() < MIN_GROUP_SIZE or both.sum() < MIN_GROUP_SIZE:
             return None
 
         # 各グループの優秀率
@@ -1528,8 +1559,8 @@ class TalentAnalyzer:
         synergy = actual_effect - additive_effect
 
         # 閾値チェック
-        synergy_threshold = interaction_config.get('synergy_threshold', 0.1)
-        min_both_rate = interaction_config.get('min_both_rate', 0.7)
+        synergy_threshold = interaction_config.get('synergy_threshold', SYNERGY_THRESHOLD)
+        min_both_rate = interaction_config.get('min_both_rate', MIN_BOTH_RATE)
 
         if synergy > synergy_threshold and rate_both >= min_both_rate:
             return {

@@ -41,20 +41,22 @@ EXPORT_MEMBER_FILE = get_config('files.export.member_scores', 'member_scores.csv
 FILE_ENCODING = get_config('files.encoding', 'utf-8-sig')
 
 # セッション状態の初期化
-if 'analyzer' not in st.session_state:
-    st.session_state.analyzer = None
-if 'data_loaded' not in st.session_state:
-    st.session_state.data_loaded = False
-if 'results' not in st.session_state:
-    st.session_state.results = None
-if 'evaluation_results' not in st.session_state:
-    st.session_state.evaluation_results = None
-if 'causal_results' not in st.session_state:
-    st.session_state.causal_results = None
-if 'interaction_results' not in st.session_state:
-    st.session_state.interaction_results = None
-if 'member_df' not in st.session_state:
-    st.session_state.member_df = None
+def initialize_session_state():
+    """セッション状態を初期化"""
+    session_defaults = {
+        'analyzer': None,
+        'data_loaded': False,
+        'results': None,
+        'evaluation_results': None,
+        'causal_results': None,
+        'interaction_results': None,
+        'member_df': None,
+    }
+    for key, default_value in session_defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value
+
+initialize_session_state()
 
 # タイトル
 st.title(f"{get_config('ui.page_icon', '🎯')} {get_config('ui.page_title', 'GNN優秀人材分析システム')}")
