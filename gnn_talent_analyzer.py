@@ -1492,8 +1492,23 @@ class TalentAnalyzer:
                 'significant': p_value < 0.05
             }
 
+        except (ValueError, ZeroDivisionError) as e:
+            logger.warning(
+                f"スキル {skill_name} の因果推論計算エラー（数値エラー）: {e}. "
+                f"データが不適切である可能性があります"
+            )
+            return {
+                'skill_code': skill_code,
+                'skill_name': skill_name,
+                'causal_effect': None,
+                'status': 'numerical_error',
+                'interpretation': f'数値計算エラー（スキル分布が不適切）'
+            }
         except Exception as e:
-            logger.error(f"スキル {skill_name} の因果推論エラー: {str(e)}")
+            logger.error(
+                f"スキル {skill_name} の因果推論エラー（予期しないエラー）: {e}",
+                exc_info=True
+            )
             return {
                 'skill_code': skill_code,
                 'skill_name': skill_name,
