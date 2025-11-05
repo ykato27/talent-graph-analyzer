@@ -27,11 +27,22 @@ class ConfigLoader:
 
     def _load_config(self):
         """設定ファイルを読み込む"""
-        # 2つの可能なパスをチェック（開発環境と本番環境に対応）
+        # 環境変数から config path を取得（Streamlit Cloud対応）
+        config_path = os.environ.get('TALENT_ANALYZER_CONFIG')
+
+        if config_path:
+            config_path = Path(config_path)
+            if config_path.exists():
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    self._config = yaml.safe_load(f)
+                return
+
+        # フォールバック: 標準パス（開発環境）
+        # src/talent_analyzer/config/loader.py から project_root/config/config.yaml へ
         config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.yaml"
 
-        # 代替パス（相対インポートの場合）
         if not config_path.exists():
+            # 代替パス（ローカル開発用）
             config_path = Path(__file__).parent / "config.yaml"
 
         if not config_path.exists():
