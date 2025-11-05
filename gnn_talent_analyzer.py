@@ -17,6 +17,7 @@ import logging
 import os
 import pickle
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from config_loader import get_config
@@ -360,11 +361,72 @@ class TalentAnalyzer:
         self.column_names = get_config('column_names', {})
         self.position_mapping = get_config('position_mapping', {})
 
+    def _validate_input_data(self, df, df_name, required_columns=None):
+        """
+        入力データフレームの検証
+
+        Args:
+            df: 検証対象のDataFrame
+            df_name: DataFrameの名前（エラーメッセージ用）
+            required_columns: 必須カラムのリスト（デフォルト: None）
+
+        Raises:
+            DataValidationError: 検証失敗時
+        """
+        # 型チェック
+        if not isinstance(df, pd.DataFrame):
+            raise DataValidationError(
+                f"{df_name} は pandas.DataFrame である必要があります。"
+                f"受け取った型: {type(df).__name__}"
+            )
+
+        # 空チェック
+        if df.empty:
+            raise DataValidationError(f"{df_name} は空のDataFrameです")
+
+        # 必須カラム確認
+        if required_columns:
+            missing_cols = [col for col in required_columns if col not in df.columns]
+            if missing_cols:
+                raise DataValidationError(
+                    f"{df_name} に必須カラムが不足しています。"
+                    f"不足カラム: {missing_cols}. "
+                    f"利用可能なカラム: {list(df.columns)}"
+                )
+
+        # 欠損値の多さをチェック
+        missing_ratio = df.isnull().sum() / len(df)
+        if (missing_ratio > 0.5).any():
+            high_missing_cols = missing_ratio[missing_ratio > 0.5].index.tolist()
+            logger.warning(
+                f"{df_name} に50%以上の欠損値があるカラム: {high_missing_cols}. "
+                f"分析結果に影響を与える可能性があります"
+            )
+
+        logger.info(f"{df_name} の検証成功: {len(df)}行 × {len(df.columns)}列")
+
     def load_data(self, member_df, acquired_df, skill_df, education_df, license_df):
         """
         CSVデータを読み込んで処理
+
+        Args:
+            member_df: 社員マスタDataFrame
+            acquired_df: スキル習得DataFrameframe
+            skill_df: スキルマスタDataFrame
+            education_df: 教育マスタDataFrame
+            license_df: 資格マスタDataFrame
+
+        Raises:
+            DataValidationError: 入力データの検証失敗時
         """
-        print("データ読み込み中...")
+        logger.info("データ読み込みを開始しました")
+
+        # 入力データの検証
+        self._validate_input_data(member_df, 'member_df')
+        self._validate_input_data(acquired_df, 'acquired_df')
+        self._validate_input_data(skill_df, 'skill_df')
+        self._validate_input_data(education_df, 'education_df')
+        self._validate_input_data(license_df, 'license_df')
 
         # カラム名を取得
         col_member = self.column_names.get('member', {})
@@ -425,7 +487,12 @@ class TalentAnalyzer:
 
             try:
                 all_skills[skill_code]['data'][member_code] = float(level)
-            except:
+            except (ValueError, TypeError) as e:
+                logger.debug(
+                    f"スキルレベルの変換に失敗 "
+                    f"(メンバー: {member_code}, スキル: {skill_code}, 値: {level}): {e}. "
+                    f"デフォルト値 0 を使用"
+                )
                 all_skills[skill_code]['data'][member_code] = 0
 
         # EDUCATION
@@ -747,8 +814,11 @@ class TalentAnalyzer:
                     skill['p_adjusted'] = p_adjusted[i]
                     skill['significant'] = reject[i]
                     skill['significance_level'] = self._get_significance_label(p_adjusted[i])
-            except:
-                logger.warning("多重検定補正に失敗しました")
+            except (ValueError, IndexError) as e:
+                logger.warning(
+                    f"多重検定補正に失敗しました (方法: {correction_method}): {e}. "
+                    f"補正なしの p-値を使用"
+                )
                 for skill in skill_importance:
                     skill['p_adjusted'] = skill['p_value']
                     skill['significant'] = skill['p_value'] < alpha
@@ -1057,6 +1127,41 @@ class TalentAnalyzer:
 
         return metrics
 
+    def _sanitize_version(self, version: str) -> str:
+        """
+        バージョン文字列をサニタイズ（パストラバーサル対策）
+
+        許可される文字: 英数字、アンダースコア、ハイフン
+        Path traversal 試行（"..", "/" 等）を防止
+
+        Args:
+            version: バージョン文字列
+
+        Returns:
+            サニタイズされたバージョン文字列
+
+        Raises:
+            ValueError: サニタイズされたバージョンが不正な形式の場合
+        """
+        # 許可される文字のみを抽出：英数字、アンダースコア、ハイフン
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', version)
+
+        # サニタイズ前後で変更があるかチェック
+        if sanitized != version:
+            logger.warning(
+                f"バージョン文字列をサニタイズしました: "
+                f"'{version}' → '{sanitized}' "
+                f"（不正な文字を削除）"
+            )
+
+        # 空の文字列チェック
+        if not sanitized:
+            raise ValueError(
+                f"バージョン文字列が無効です（許可される文字なし）: '{version}'"
+            )
+
+        return sanitized
+
     def save_model(self, excellent_members, version=None):
         """
         学習済みモデルを保存
@@ -1067,6 +1172,9 @@ class TalentAnalyzer:
             優秀群の社員コードリスト
         version: str, optional
             バージョン名
+
+        Raises:
+            ModelTrainingError: モデル保存に失敗した場合
         """
         versioning_config = get_config('versioning', {})
 
@@ -1080,6 +1188,13 @@ class TalentAnalyzer:
         # バージョン名の生成
         if version is None:
             version = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # バージョン文字列をサニタイズ（セキュリティ対策）
+        try:
+            version = self._sanitize_version(version)
+        except ValueError as e:
+            logger.error(f"バージョン文字列の検証失敗: {e}")
+            raise ModelTrainingError(f"無効なバージョン名: {e}") from e
 
         model_path = model_dir / f"model_{version}.pkl"
 
@@ -1130,7 +1245,18 @@ class TalentAnalyzer:
         -----------
         version: str
             バージョン名
+
+        Returns:
+        --------
+        bool: 読み込み成功時はTrue、失敗時はFalse
         """
+        # バージョン文字列をサニタイズ（セキュリティ対策）
+        try:
+            version = self._sanitize_version(version)
+        except ValueError as e:
+            logger.error(f"バージョン文字列の検証失敗: {e}")
+            return False
+
         model_dir = Path(get_config('versioning.model_dir', './models'))
         model_path = model_dir / f"model_{version}.pkl"
 
@@ -1155,8 +1281,14 @@ class TalentAnalyzer:
 
             return True
 
+        except (FileNotFoundError, IOError) as e:
+            logger.error(f"モデルファイルの読み込みに失敗しました: {e}", exc_info=True)
+            return False
+        except (KeyError, ValueError) as e:
+            logger.error(f"モデルデータが不正または欠損しています: {e}", exc_info=True)
+            return False
         except Exception as e:
-            logger.error(f"モデル読み込みエラー: {str(e)}")
+            logger.error(f"予期しないエラーが発生しました（モデル読み込み）: {e}", exc_info=True)
             return False
 
     def estimate_causal_effects(self, excellent_members):

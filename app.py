@@ -7,8 +7,20 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
-from gnn_talent_analyzer import TalentAnalyzer
+import logging
+from gnn_talent_analyzer import (
+    TalentAnalyzer,
+    DataValidationError,
+    DataLoadingError,
+    ModelTrainingError,
+    ModelEvaluationError,
+    CausalInferenceError,
+    AnalysisError
+)
 from config_loader import get_config
+
+# ロギング設定
+logger = logging.getLogger('TalentAnalyzer')
 
 # ページ設定
 st.set_page_config(
@@ -78,11 +90,23 @@ if st.sidebar.button("📊 データ読み込み"):
         try:
             with st.spinner("データ読み込み中..."):
                 # CSVファイルを読み込み
-                member_df = pd.read_csv(uploaded_files['member'], encoding=FILE_ENCODING)
-                acquired_df = pd.read_csv(uploaded_files['acquired'], encoding=FILE_ENCODING)
-                skill_df = pd.read_csv(uploaded_files['skill'], encoding=FILE_ENCODING)
-                education_df = pd.read_csv(uploaded_files['education'], encoding=FILE_ENCODING)
-                license_df = pd.read_csv(uploaded_files['license'], encoding=FILE_ENCODING)
+                try:
+                    member_df = pd.read_csv(uploaded_files['member'], encoding=FILE_ENCODING)
+                    acquired_df = pd.read_csv(uploaded_files['acquired'], encoding=FILE_ENCODING)
+                    skill_df = pd.read_csv(uploaded_files['skill'], encoding=FILE_ENCODING)
+                    education_df = pd.read_csv(uploaded_files['education'], encoding=FILE_ENCODING)
+                    license_df = pd.read_csv(uploaded_files['license'], encoding=FILE_ENCODING)
+                except pd.errors.ParserError as e:
+                    logger.error(f"CSV解析エラー: {e}", exc_info=True)
+                    st.sidebar.error(
+                        f"❌ CSV形式が無効です。カラム名と型を確認してください。\n"
+                        f"詳細: {str(e)}"
+                    )
+                    raise DataLoadingError(f"CSV解析失敗: {e}") from e
+                except FileNotFoundError as e:
+                    logger.error(f"ファイルが見つかりません: {e}", exc_info=True)
+                    st.sidebar.error(f"❌ ファイルが見つかりません: {str(e)}")
+                    raise DataLoadingError(f"ファイルが見つかりません: {e}") from e
 
                 # アナライザーの初期化
                 analyzer = TalentAnalyzer()
@@ -93,8 +117,19 @@ if st.sidebar.button("📊 データ読み込み"):
                 st.session_state.data_loaded = True
 
                 st.sidebar.success("✅ データ読み込み完了")
+        except DataValidationError as e:
+            logger.error(f"データ検証エラー: {e}", exc_info=True)
+            st.sidebar.error(f"❌ データ検証エラー: {str(e)}")
+        except DataLoadingError as e:
+            logger.error(f"データ読み込みエラー: {e}", exc_info=True)
+            st.sidebar.error(f"❌ データ読み込みエラー: {str(e)}")
         except Exception as e:
-            st.sidebar.error(f"❌ エラー: {str(e)}")
+            logger.error(f"予期しないエラーが発生しました: {e}", exc_info=True)
+            st.sidebar.error(
+                f"❌ 予期しないエラーが発生しました。\n"
+                f"ファイル形式とデータ内容を確認してください。\n"
+                f"詳細: {str(e)}"
+            )
     else:
         st.sidebar.warning("⚠️ すべてのCSVファイルをアップロードしてください")
 
@@ -245,8 +280,43 @@ if st.session_state.data_loaded:
                     analyzer.save_model(selected_members)
 
             st.success("✅ 分析完了！")
+        except ModelTrainingError as e:
+            logger.error(f"モデル学習エラー: {e}", exc_info=True)
+            st.error(
+                f"❌ モデル学習中にエラーが発生しました。\n"
+                f"詳細: {str(e)}\n\n"
+                f"対策:\n"
+                f"- エポック数を減らしてみてください\n"
+                f"- 優秀人材の人数を増やしてみてください"
+            )
+        except ModelEvaluationError as e:
+            logger.error(f"モデル評価エラー: {e}", exc_info=True)
+            st.error(
+                f"❌ モデル評価中にエラーが発生しました。\n"
+                f"詳細: {str(e)}"
+            )
+        except CausalInferenceError as e:
+            logger.error(f"因果推論エラー: {e}", exc_info=True)
+            st.error(
+                f"❌ 因果推論の実行中にエラーが発生しました。\n"
+                f"詳細: {str(e)}\n\n"
+                f"対策:\n"
+                f"- 優秀人材の人数を増やしてみてください\n"
+                f"- スキル選択を確認してください"
+            )
+        except AnalysisError as e:
+            logger.error(f"分析エラー: {e}", exc_info=True)
+            st.error(
+                f"❌ 分析中にエラーが発生しました。\n"
+                f"詳細: {str(e)}"
+            )
         except Exception as e:
-            st.error(f"❌ エラーが発生しました: {str(e)}")
+            logger.error(f"予期しないエラーが発生しました: {e}", exc_info=True)
+            st.error(
+                f"❌ 予期しないエラーが発生しました。\n"
+                f"詳細: {str(e)}\n\n"
+                f"ログ出力:"
+            )
             import traceback
             st.error(traceback.format_exc())
 

@@ -4,8 +4,12 @@
 
 import yaml
 import os
+import logging
 from pathlib import Path
 from typing import Dict, Any
+
+# ロギング設定
+logger = logging.getLogger('ConfigLoader')
 
 
 class ConfigLoader:
@@ -26,14 +30,53 @@ class ConfigLoader:
             self._load_config()
 
     def _load_config(self):
-        """設定ファイルを読み込む"""
+        """設定ファイルを読み込む
+
+        Raises:
+            FileNotFoundError: 設定ファイルが見つからない場合
+            yaml.YAMLError: YAML解析に失敗した場合
+            ValueError: 設定が無効な場合
+        """
         config_path = Path(__file__).parent / "config.yaml"
 
+        # ファイルの存在確認
         if not config_path.exists():
-            raise FileNotFoundError(f"設定ファイルが見つかりません: {config_path}")
+            logger.error(f"設定ファイルが見つかりません: {config_path}")
+            raise FileNotFoundError(
+                f"設定ファイルが見つかりません: {config_path}\n"
+                f"expected path: {config_path.absolute()}"
+            )
 
-        with open(config_path, 'r', encoding='utf-8') as f:
-            self._config = yaml.safe_load(f)
+        # ファイルの読み込みと解析
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                self._config = yaml.safe_load(f)
+
+                # 設定が None またはリスト（不正な形式）でないか確認
+                if self._config is None:
+                    logger.warning(f"設定ファイルが空です: {config_path}")
+                    self._config = {}
+                elif not isinstance(self._config, dict):
+                    logger.error(f"設定ファイルの形式が無効です（辞書である必要があります）")
+                    raise ValueError(
+                        f"設定ファイルは YAML 辞書である必要があります。"
+                        f"受け取った型: {type(self._config).__name__}"
+                    )
+
+                logger.info(f"設定ファイルを読み込みました: {config_path}")
+
+        except yaml.YAMLError as e:
+            logger.error(f"YAML解析エラー: {e}", exc_info=True)
+            raise yaml.YAMLError(
+                f"設定ファイルのYAML形式が無効です: {config_path}\n"
+                f"エラー: {e}"
+            ) from e
+        except IOError as e:
+            logger.error(f"ファイル読み込みエラー: {e}", exc_info=True)
+            raise IOError(
+                f"設定ファイルの読み込みに失敗しました: {config_path}\n"
+                f"エラー: {e}"
+            ) from e
 
     def get(self, key_path: str, default: Any = None) -> Any:
         """
