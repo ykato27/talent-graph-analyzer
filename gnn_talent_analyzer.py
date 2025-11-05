@@ -1133,6 +1133,10 @@ class TalentAnalyzer:
             self.skill_codes = model_data['skill_codes']
             self.skill_names = model_data['skill_names']
 
+            # 属性の初期化（古いモデル互換性のため）
+            if not hasattr(self.gnn, 'last_training_time'):
+                self.gnn.last_training_time = None
+
             logger.info(f"モデルを読み込みました: {model_path}")
             logger.info(f"バージョン: {model_data.get('version')}, タイムスタンプ: {model_data.get('timestamp')}")
 

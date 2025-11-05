@@ -209,13 +209,16 @@ if st.session_state.data_loaded:
                 analyzer.train(selected_members, epochs_unsupervised=epochs)
 
             # 学習時間情報を表示
-            if analyzer.gnn.last_training_time is not None:
-                training_time_seconds = analyzer.gnn.last_training_time
-                if training_time_seconds < 60:
-                    time_str = f"{training_time_seconds:.1f}秒"
-                else:
-                    time_str = f"{training_time_seconds/60:.1f}分"
-                st.info(f"📊 GNN学習完了 - 学習時間: {time_str}")
+            try:
+                if hasattr(analyzer.gnn, 'last_training_time') and analyzer.gnn.last_training_time is not None:
+                    training_time_seconds = analyzer.gnn.last_training_time
+                    if training_time_seconds < 60:
+                        time_str = f"{training_time_seconds:.1f}秒"
+                    else:
+                        time_str = f"{training_time_seconds/60:.1f}分"
+                    st.info(f"📊 GNN学習完了 - 学習時間: {time_str}")
+            except AttributeError as e:
+                st.warning(f"⚠️ 学習時間情報の取得に失敗しました: {str(e)}")
 
             # 基本分析
             with st.spinner("分析実行中..."):
