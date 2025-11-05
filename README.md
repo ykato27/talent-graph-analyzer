@@ -23,22 +23,45 @@ Graph Neural Network (GNN)を用いた優秀人材の特徴抽出・分析シス
 
 ## セットアップ
 
+### 1. リポジトリのクローン
+
 ```bash
-# 必要なパッケージのインストール
+git clone https://github.com/ykato27/talent-graph-analyzer.git
+cd talent-graph-analyzer
+```
+
+### 2. 依存パッケージのインストール
+
+```bash
 pip install -r requirements.txt
+```
 
-# Streamlit アプリの起動
-streamlit run app.py
+### 3. 環境変数の設定（オプション）
 
-# 環境変数の設定（オプション）
+```bash
 cp .env.example .env
 # 必要に応じて .env を編集
+```
 
-# Streamlitアプリの起動
+### 4. Streamlit アプリの起動
+
+```bash
 streamlit run app.py
 ```
 
 ブラウザで `http://localhost:8501` にアクセスしてください。
+
+## クイックスタート
+
+```bash
+# 全セットアップ手順
+git clone https://github.com/ykato27/talent-graph-analyzer.git
+cd talent-graph-analyzer
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+その後、Streamlit UIから5つのCSVファイルをアップロードして分析を実行できます。
 
 ## 設定のカスタマイズ
 
@@ -76,14 +99,39 @@ streamlit run app.py
 
 ### 4. 結果の確認
 
-以下の最大7つの観点で分析結果を確認できます：
+#### ダッシュボード表示
+分析完了後、以下のダッシュボード形式で結果を確認できます：
 
-1. **重要スキルランキング**: 優秀群に特徴的なスキル（統計的有意性付き）
-2. **社員スコアランキング**: 全社員の優秀度スコア
-3. **スキル比較分析**: 優秀群と非優秀群の差異
-4. **埋め込み可視化**: GNNが学習した潜在表現
-5. **モデル性能**: AUC、Precision、Recall、F1スコアなどの評価指標
-6. **因果効果**: スキルの純粋な効果推定（交絡因子調整済み）
+**① Top スキル**
+- 最重要な3つのスキルをカード形式で表示
+- 重要度スコア、保有率差分を一目で確認
+
+**② 分析サマリー**
+- 優秀群人数、分析対象者数、優秀群比率、学習時間を表示
+
+**③ 分析グラフ**
+- スキル保有率比較（上位10スキル）
+- 社員スコア分布（ヒストグラム）
+- スキル相互作用（相乗効果トップ5）
+
+**④ モデル性能**
+- Train/Test AUC、Precision、Recall、F1スコア
+
+**⑤ 詳細分析（折りたたみ式）**
+- 詳細スキル一覧
+- 社員スコアランキング
+- 詳細モデル性能
+- 因果効果分析
+- スキル相互作用詳細
+
+#### 分析項目（最大7つ）
+
+1. **Top スキル**: 優秀群に最も特徴的な3つのスキル
+2. **スキル比較分析**: 優秀群と非優秀群のスキル保有率の差異
+3. **社員スコア分布**: 全社員の優秀度スコアの分布
+4. **埋め込み可視化**: GNNが学習した潜在表現（2次元PCA）
+5. **モデル性能**: Holdout法またはLOOCVによる評価指標
+6. **因果効果**: 傾向スコアマッチングによるスキルの真の効果推定
 7. **スキル相互作用**: 相乗効果のあるスキル組み合わせ
 
 ### 5. 結果のダウンロード
@@ -165,15 +213,33 @@ streamlit run app.py
 ## ファイル構成
 
 ```
-.
-├── app.py                      # Streamlitアプリケーション
-├── gnn_talent_analyzer.py      # GNNモデルと分析ロジック
-├── config_loader.py            # 設定ファイル読み込みユーティリティ
-├── config.yaml                 # 設定ファイル（パラメータ、カラム名など）
-├── requirements.txt            # 必要パッケージ
-├── .gitignore                  # Git除外ファイル
-├── .env.example                # 環境変数テンプレート
-└── README.md                   # このファイル
+talent-graph-analyzer/
+├── app.py                      # Streamlit UIメインアプリケーション
+│                              # - ダッシュボードコンポーネント関数
+│                              # - データアップロード処理
+│                              # - リアルタイム学習進捗表示
+│
+├── gnn_talent_analyzer.py     # GNNモデルと分析エンジン
+│                              # - SimpleGNNクラス（GraphSAGE実装）
+│                              # - TalentAnalyzerクラス（分析ロジック）
+│                              # - 因果推論、スキル相互作用分析
+│
+├── config_loader.py           # 設定ファイル読み込みユーティリティ
+│
+├── config.yaml                # 設定ファイル
+│                              # - モデルパラメータ
+│                              # - 学習パラメータ
+│                              # - UI設定
+│                              # - カラム名マッピング
+│
+├── requirements.txt           # Pythonパッケージ依存関係
+├── .env.example               # 環境変数テンプレート
+├── .gitignore                 # Git除外ファイル
+├── README.md                  # このファイル
+├── CHANGELOG.md               # 詳細な変更履歴
+├── DEVELOPMENT.md             # 開発ガイド
+└── models/                    # 学習済みモデルの保存ディレクトリ
+   └── (自動生成)
 ```
 
 ## トラブルシューティング
@@ -226,7 +292,28 @@ MIT License
 
 ## 更新履歴
 
-- v1.0 (2025-01-XX): 初版リリース
-  - GNN実装
+詳細な更新履歴は [CHANGELOG.md](./CHANGELOG.md) を参照してください。
+
+### 主要バージョン
+
+- **v1.2** (2025-11-05): ダッシュボード UI 改善
+  - 新しいダッシュボードレイアウト実装
+  - Top 3スキルのカード表示
+  - グラフの統合表示
+  - 詳細分析セクションの折りたたみ化
+
+- **v1.1** (2025-11-XX): リアルタイム学習進捗表示追加
+  - 進捗バー表示
+  - リアルタイム損失関数表示
+  - 学習時間の計測と表示
+
+- **v1.0** (2025-XX-XX): 初版リリース
+  - GNN（GraphSAGE）実装
   - 半教師あり学習対応
+  - Few-shot学習対応
+  - 統計的検定（Fisher正確検定）
+  - 因果推論（傾向スコアマッチング）
+  - スキル相互作用分析
+  - モデル評価（Holdout/LOOCV）
   - Streamlit UI実装
+  - モデルバージョン管理
