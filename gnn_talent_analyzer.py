@@ -322,7 +322,7 @@ class SimpleGNN:
                     self.weights[i] = old_weight
 
             if epoch % 20 == 0:
-                print(f"Epoch {epoch}/{epochs}, Loss: {loss:.4f}")
+                logger.debug(f"事前学習: Epoch {epoch}/{epochs}, Loss: {loss:.4f}")
 
             # Early stopping
             if loss < best_loss:
@@ -332,11 +332,11 @@ class SimpleGNN:
                 patience_counter += 1
 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}")
+                logger.info(f"早期停止: Epoch {epoch}で学習を停止しました")
                 break
 
         self.trained = True
-        print("事前学習完了")
+        logger.info("グラフ事前学習が完了しました")
         return self
 
     def get_embeddings(self, adjacency, features):
@@ -450,7 +450,7 @@ class TalentAnalyzer:
         # 社員特徴量の作成
         self.create_member_features(member_df, acquired_df)
 
-        print(f"データ読み込み完了: 社員{len(self.members)}名, スキル{self.skill_matrix.shape[1]}種")
+        logger.info(f"データ読み込み完了: 社員{len(self.members)}名, スキル{self.skill_matrix.shape[1]}種")
 
     def process_skills(self, acquired_df, skill_df, education_df, license_df):
         """
@@ -605,10 +605,10 @@ class TalentAnalyzer:
         epochs_unsupervised: int, optional
             学習エポック数
         """
-        print(f"\n優秀群: {len(excellent_members)}名で学習開始")
+        logger.info(f"優秀群 {len(excellent_members)}名の学習を開始します")
 
         # グラフ構築
-        print("グラフ構築中...")
+        logger.info("グラフ構築を開始...")
         adjacency = self.gnn.build_graph(
             self.member_features,
             self.skill_matrix,
@@ -629,7 +629,7 @@ class TalentAnalyzer:
         excellent_indices = [self.member_to_idx[m] for m in excellent_members if m in self.member_to_idx]
         self.prototype = np.mean(self.embeddings[excellent_indices], axis=0)
 
-        print("学習完了")
+        logger.info(f"学習完了しました（プロトタイプ次元: {self.prototype.shape[0]}）")
 
     def analyze(self, excellent_members):
         """
