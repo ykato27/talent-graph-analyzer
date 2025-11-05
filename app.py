@@ -58,49 +58,54 @@ def initialize_session_state():
 
 initialize_session_state()
 
-# タイトル
-st.title(f"{get_config('ui.page_icon', '🎯')} {get_config('ui.page_title', 'GNN優秀人材分析システム')}")
-st.markdown("---")
+# ==================== UIコンポーネント関数 ====================
+def render_header():
+    """ヘッダーを描画"""
+    st.title(f"{get_config('ui.page_icon', '🎯')} {get_config('ui.page_title', 'GNN優秀人材分析システム')}")
+    st.markdown("---")
 
-# サイドバー
-st.sidebar.header("📁 データアップロード")
+def render_data_upload_sidebar():
+    """データアップロードサイドバーを描画"""
+    st.sidebar.header("📁 データアップロード")
 
-# ファイルアップロード
-uploaded_files = {
-    'member': st.sidebar.file_uploader("社員マスタ (member_skillnote.csv)", type=['csv']),
-    'acquired': st.sidebar.file_uploader("スキル習得データ (acquiredCompetenceLevel.csv)", type=['csv']),
-    'skill': st.sidebar.file_uploader("スキルマスタ (skill_skillnote.csv)", type=['csv']),
-    'education': st.sidebar.file_uploader("教育マスタ (education_skillnote.csv)", type=['csv']),
-    'license': st.sidebar.file_uploader("資格マスタ (license_skillnote.csv)", type=['csv'])
-}
+    uploaded_files = {
+        'member': st.sidebar.file_uploader("社員マスタ (member_skillnote.csv)", type=['csv']),
+        'acquired': st.sidebar.file_uploader("スキル習得データ (acquiredCompetenceLevel.csv)", type=['csv']),
+        'skill': st.sidebar.file_uploader("スキルマスタ (skill_skillnote.csv)", type=['csv']),
+        'education': st.sidebar.file_uploader("教育マスタ (education_skillnote.csv)", type=['csv']),
+        'license': st.sidebar.file_uploader("資格マスタ (license_skillnote.csv)", type=['csv'])
+    }
 
-# データ読み込みボタン
-if st.sidebar.button("📊 データ読み込み"):
-    if all(uploaded_files.values()):
-        try:
-            with st.spinner("データ読み込み中..."):
-                # CSVファイルを読み込み
-                member_df = pd.read_csv(uploaded_files['member'], encoding=FILE_ENCODING)
-                acquired_df = pd.read_csv(uploaded_files['acquired'], encoding=FILE_ENCODING)
-                skill_df = pd.read_csv(uploaded_files['skill'], encoding=FILE_ENCODING)
-                education_df = pd.read_csv(uploaded_files['education'], encoding=FILE_ENCODING)
-                license_df = pd.read_csv(uploaded_files['license'], encoding=FILE_ENCODING)
+    if st.sidebar.button("📊 データ読み込み"):
+        if all(uploaded_files.values()):
+            try:
+                with st.spinner("データ読み込み中..."):
+                    # CSVファイルを読み込み
+                    member_df = pd.read_csv(uploaded_files['member'], encoding=FILE_ENCODING)
+                    acquired_df = pd.read_csv(uploaded_files['acquired'], encoding=FILE_ENCODING)
+                    skill_df = pd.read_csv(uploaded_files['skill'], encoding=FILE_ENCODING)
+                    education_df = pd.read_csv(uploaded_files['education'], encoding=FILE_ENCODING)
+                    license_df = pd.read_csv(uploaded_files['license'], encoding=FILE_ENCODING)
 
-                # アナライザーの初期化
-                analyzer = TalentAnalyzer()
-                analyzer.load_data(member_df, acquired_df, skill_df, education_df, license_df)
+                    # アナライザーの初期化
+                    analyzer = TalentAnalyzer()
+                    analyzer.load_data(member_df, acquired_df, skill_df, education_df, license_df)
 
-                st.session_state.analyzer = analyzer
-                st.session_state.member_df = member_df
-                st.session_state.data_loaded = True
+                    st.session_state.analyzer = analyzer
+                    st.session_state.member_df = member_df
+                    st.session_state.data_loaded = True
 
-                st.sidebar.success("✅ データ読み込み完了")
-        except Exception as e:
-            st.sidebar.error(f"❌ エラー: {str(e)}")
-    else:
-        st.sidebar.warning("⚠️ すべてのCSVファイルをアップロードしてください")
+                    st.sidebar.success("✅ データ読み込み完了")
+            except Exception as e:
+                st.sidebar.error(f"❌ エラー: {str(e)}")
+        else:
+            st.sidebar.warning("⚠️ すべてのCSVファイルをアップロードしてください")
 
-st.sidebar.markdown("---")
+    st.sidebar.markdown("---")
+
+# ==================== メイン処理 ====================
+render_header()
+render_data_upload_sidebar()
 
 # メインコンテンツ
 if st.session_state.data_loaded:
