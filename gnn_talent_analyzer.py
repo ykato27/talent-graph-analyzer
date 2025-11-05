@@ -659,6 +659,11 @@ class TalentAnalyzer:
         """
         優秀群の特徴分析
 
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+
         Returns:
         --------
         results: dict
@@ -672,7 +677,42 @@ class TalentAnalyzer:
         excellent_indices = [self.member_to_idx[m] for m in excellent_members if m in self.member_to_idx]
         non_excellent_indices = [i for i in range(len(self.members)) if i not in excellent_indices]
 
-        # スキル保有率の比較
+        # スキル重要度の分析
+        skill_importance = self._analyze_skill_importance(
+            excellent_indices, non_excellent_indices
+        )
+
+        # 社員スコアの計算
+        member_scores = self._calculate_member_scores(excellent_members)
+
+        results = {
+            'skill_importance': skill_importance[:top_skills],
+            'member_scores': member_scores,
+            'n_excellent': len(excellent_members),
+            'n_total': len(self.members),
+            'embeddings': self.embeddings,
+            'excellent_indices': excellent_indices
+        }
+
+        logger.info("分析完了")
+        return results
+
+    def _analyze_skill_importance(self, excellent_indices, non_excellent_indices):
+        """
+        スキル重要度を分析
+
+        Parameters:
+        -----------
+        excellent_indices: list
+            優秀群のインデックスリスト
+        non_excellent_indices: list
+            非優秀群のインデックスリスト
+
+        Returns:
+        --------
+        skill_importance: list
+            スキル重要度の分析結果
+        """
         excellent_skills = self.skill_matrix[excellent_indices]
         non_excellent_skills = self.skill_matrix[non_excellent_indices]
 
@@ -720,13 +760,29 @@ class TalentAnalyzer:
         # 重要度でソート
         skill_importance = sorted(skill_importance, key=lambda x: x['importance_score'], reverse=True)
 
-        # 社員の優秀度スコアを計算
+        return skill_importance
+
+    def _calculate_member_scores(self, excellent_members):
+        """
+        社員の優秀度スコアを計算
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+
+        Returns:
+        --------
+        member_scores: list
+            社員スコアの計算結果
+        """
         member_scores = []
+        max_distance = np.max([np.linalg.norm(emb - self.prototype) for emb in self.embeddings])
+
         for idx, member_code in enumerate(self.members):
             # プロトタイプとの距離を計算
             distance = np.linalg.norm(self.embeddings[idx] - self.prototype)
             # スコアに変換（距離が近いほど高スコア）
-            max_distance = np.max([np.linalg.norm(emb - self.prototype) for emb in self.embeddings])
             score = (1 - distance / max_distance) * 100
 
             member_scores.append({
@@ -738,17 +794,7 @@ class TalentAnalyzer:
 
         member_scores = sorted(member_scores, key=lambda x: x['score'], reverse=True)
 
-        results = {
-            'skill_importance': skill_importance[:top_skills],
-            'member_scores': member_scores,
-            'n_excellent': len(excellent_members),
-            'n_total': len(self.members),
-            'embeddings': self.embeddings,
-            'excellent_indices': excellent_indices
-        }
-
-        logger.info("分析完了")
-        return results
+        return member_scores
 
     def _add_statistical_significance(self, skill_importance, n_excellent, n_non_excellent):
         """
