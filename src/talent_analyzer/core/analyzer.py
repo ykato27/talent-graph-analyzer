@@ -21,16 +21,16 @@ import json
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from config_loader import get_config
 
 # モジュール化されたコンポーネントのインポート
-from utils import setup_logging, load_csv_files, get_logger, format_time, ensure_dir_exists
-from constants import (
+from ..config.loader import get_config
+from ..utils import setup_logging, load_csv_files, get_logger, format_time, ensure_dir_exists
+from ..config import (
     ModelConfig, TrainingConfig, StatisticalConfig,
     CausalInferenceConfig, SkillInteractionConfig, NumericalConfig,
     AnalysisConfig
 )
-from gnn_models import SimpleGNN
+from .gnn_models import SimpleGNN
 
 warnings.filterwarnings('ignore')
 

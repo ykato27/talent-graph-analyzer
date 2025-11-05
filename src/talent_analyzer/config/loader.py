@@ -27,7 +27,12 @@ class ConfigLoader:
 
     def _load_config(self):
         """設定ファイルを読み込む"""
-        config_path = Path(__file__).parent / "config.yaml"
+        # 2つの可能なパスをチェック（開発環境と本番環境に対応）
+        config_path = Path(__file__).parent.parent.parent.parent / "config" / "config.yaml"
+
+        # 代替パス（相対インポートの場合）
+        if not config_path.exists():
+            config_path = Path(__file__).parent / "config.yaml"
 
         if not config_path.exists():
             raise FileNotFoundError(f"設定ファイルが見つかりません: {config_path}")

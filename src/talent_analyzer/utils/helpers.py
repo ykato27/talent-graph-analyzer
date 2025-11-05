@@ -9,7 +9,7 @@ import logging
 import pandas as pd
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
-from config_loader import get_config
+from ..config.loader import get_config
 
 
 def setup_logging():
