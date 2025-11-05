@@ -62,6 +62,80 @@ def setup_logging():
 
 logger = setup_logging()
 
+# ==================== カスタム例外クラス ====================
+class TalentAnalyzerError(Exception):
+    """タレント分析システムの基底例外"""
+    pass
+
+
+class DataValidationError(TalentAnalyzerError):
+    """データ検証エラー"""
+    pass
+
+
+class DataLoadingError(TalentAnalyzerError):
+    """データ読み込みエラー"""
+    pass
+
+
+class ConfigurationError(TalentAnalyzerError):
+    """設定エラー"""
+    pass
+
+
+class ModelTrainingError(TalentAnalyzerError):
+    """モデル学習エラー"""
+    pass
+
+
+class ModelEvaluationError(TalentAnalyzerError):
+    """モデル評価エラー"""
+    pass
+
+
+class CausalInferenceError(TalentAnalyzerError):
+    """因果推論エラー"""
+    pass
+
+
+class AnalysisError(TalentAnalyzerError):
+    """分析エラー"""
+    pass
+
+
+# ==================== 定数定義 ====================
+# 数値計算パラメータ
+NUMERICAL_EPSILON = 1e-8
+HE_INIT_SCALE = 2.0
+
+# データ処理パラメータ
+MIN_SKILL_HOLDERS = 5
+MIN_SKILL_HOLDERS_FOR_CAUSAL = 5
+MIN_GROUP_SIZE = 3
+MAX_VALID_SKILLS = 100
+MAX_INTERACTION_PAIRS = 1000
+DEFAULT_RANDOM_STATE = 42
+
+# 統計分析パラメータ
+DEFAULT_SIGNIFICANCE_LEVEL = 0.05
+DEFAULT_CONFIDENCE_LEVEL = 0.95
+DEFAULT_SKILL_RATE_LOWER = 0.05
+DEFAULT_SKILL_RATE_UPPER = 0.95
+DEFAULT_CALIPER = 0.1
+MIN_MATCHED_PAIRS = 5
+
+# モデルパラメータ
+DEFAULT_LEARNING_RATE = 0.01
+DEFAULT_DROPOUT = 0.3
+DEFAULT_K_NEIGHBORS = 10
+DEFAULT_EPOCHS = 100
+DEFAULT_EARLY_STOPPING_PATIENCE = 20
+
+# ファイル関連
+DEFAULT_LOG_DIR = './logs'
+DEFAULT_MODEL_DIR = './models'
+DEFAULT_FILE_ENCODING = 'utf-8-sig'
+
 
 class SimpleGNN:
     """
@@ -175,7 +249,7 @@ class SimpleGNN:
         if epochs is None:
             epochs = get_config('training.default_epochs', 100)
 
-        print("半教師あり事前学習を開始...")
+        logger.info("Semi-supervised pre-training started")
         self.training = True
         n_nodes = features.shape[0]
 
@@ -629,7 +703,11 @@ class TalentAnalyzer:
             # Fisher正確検定
             try:
                 odds_ratio, p_value = fisher_exact(contingency_table)
-            except:
+            except (ValueError, ZeroDivisionError) as e:
+                logger.warning(
+                    f"Fisher検定失敗 (スキル: {skill['skill_name']}): {e}. "
+                    f"デフォルト値を使用"
+                )
                 odds_ratio, p_value = 1.0, 1.0
 
             skill['p_value'] = p_value
