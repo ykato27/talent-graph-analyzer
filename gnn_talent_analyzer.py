@@ -17,6 +17,7 @@ import logging
 import os
 import pickle
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from config_loader import get_config
@@ -61,6 +62,80 @@ def setup_logging():
     return logger
 
 logger = setup_logging()
+
+# ==================== カスタム例外クラス ====================
+class TalentAnalyzerError(Exception):
+    """タレント分析システムの基底例外"""
+    pass
+
+
+class DataValidationError(TalentAnalyzerError):
+    """データ検証エラー"""
+    pass
+
+
+class DataLoadingError(TalentAnalyzerError):
+    """データ読み込みエラー"""
+    pass
+
+
+class ConfigurationError(TalentAnalyzerError):
+    """設定エラー"""
+    pass
+
+
+class ModelTrainingError(TalentAnalyzerError):
+    """モデル学習エラー"""
+    pass
+
+
+class ModelEvaluationError(TalentAnalyzerError):
+    """モデル評価エラー"""
+    pass
+
+
+class CausalInferenceError(TalentAnalyzerError):
+    """因果推論エラー"""
+    pass
+
+
+class AnalysisError(TalentAnalyzerError):
+    """分析エラー"""
+    pass
+
+
+# ==================== 定数定義 ====================
+# 数値計算パラメータ
+NUMERICAL_EPSILON = 1e-8
+HE_INIT_SCALE = 2.0
+
+# データ処理パラメータ
+MIN_SKILL_HOLDERS = 5
+MIN_SKILL_HOLDERS_FOR_CAUSAL = 5
+MIN_GROUP_SIZE = 3
+MAX_VALID_SKILLS = 100
+MAX_INTERACTION_PAIRS = 1000
+DEFAULT_RANDOM_STATE = 42
+
+# 統計分析パラメータ
+DEFAULT_SIGNIFICANCE_LEVEL = 0.05
+DEFAULT_CONFIDENCE_LEVEL = 0.95
+DEFAULT_SKILL_RATE_LOWER = 0.05
+DEFAULT_SKILL_RATE_UPPER = 0.95
+DEFAULT_CALIPER = 0.1
+MIN_MATCHED_PAIRS = 5
+
+# モデルパラメータ
+DEFAULT_LEARNING_RATE = 0.01
+DEFAULT_DROPOUT = 0.3
+DEFAULT_K_NEIGHBORS = 10
+DEFAULT_EPOCHS = 100
+DEFAULT_EARLY_STOPPING_PATIENCE = 20
+
+# ファイル関連
+DEFAULT_LOG_DIR = './logs'
+DEFAULT_MODEL_DIR = './models'
+DEFAULT_FILE_ENCODING = 'utf-8-sig'
 
 
 class SimpleGNN:
@@ -175,7 +250,7 @@ class SimpleGNN:
         if epochs is None:
             epochs = get_config('training.default_epochs', 100)
 
-        print("半教師あり事前学習を開始...")
+        logger.info("Semi-supervised pre-training started")
         self.training = True
         n_nodes = features.shape[0]
 
@@ -234,7 +309,7 @@ class SimpleGNN:
             logger.debug(f"Loss (informational): {loss:.4f}")
 
             if epoch % 20 == 0:
-                print(f"Epoch {epoch}/{epochs}, Loss: {loss:.4f}")
+                logger.debug(f"事前学習: Epoch {epoch}/{epochs}, Loss: {loss:.4f}")
 
             # Early stopping
             if loss < best_loss:
@@ -244,11 +319,11 @@ class SimpleGNN:
                 patience_counter += 1
 
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}")
+                logger.info(f"早期停止: Epoch {epoch}で学習を停止しました")
                 break
 
         self.trained = True
-        print("事前学習完了")
+        logger.info("グラフ事前学習が完了しました")
         return self
 
     def get_embeddings(self, adjacency, features):
@@ -273,11 +348,72 @@ class TalentAnalyzer:
         self.column_names = get_config('column_names', {})
         self.position_mapping = get_config('position_mapping', {})
 
+    def _validate_input_data(self, df, df_name, required_columns=None):
+        """
+        入力データフレームの検証
+
+        Args:
+            df: 検証対象のDataFrame
+            df_name: DataFrameの名前（エラーメッセージ用）
+            required_columns: 必須カラムのリスト（デフォルト: None）
+
+        Raises:
+            DataValidationError: 検証失敗時
+        """
+        # 型チェック
+        if not isinstance(df, pd.DataFrame):
+            raise DataValidationError(
+                f"{df_name} は pandas.DataFrame である必要があります。"
+                f"受け取った型: {type(df).__name__}"
+            )
+
+        # 空チェック
+        if df.empty:
+            raise DataValidationError(f"{df_name} は空のDataFrameです")
+
+        # 必須カラム確認
+        if required_columns:
+            missing_cols = [col for col in required_columns if col not in df.columns]
+            if missing_cols:
+                raise DataValidationError(
+                    f"{df_name} に必須カラムが不足しています。"
+                    f"不足カラム: {missing_cols}. "
+                    f"利用可能なカラム: {list(df.columns)}"
+                )
+
+        # 欠損値の多さをチェック
+        missing_ratio = df.isnull().sum() / len(df)
+        if (missing_ratio > 0.5).any():
+            high_missing_cols = missing_ratio[missing_ratio > 0.5].index.tolist()
+            logger.warning(
+                f"{df_name} に50%以上の欠損値があるカラム: {high_missing_cols}. "
+                f"分析結果に影響を与える可能性があります"
+            )
+
+        logger.info(f"{df_name} の検証成功: {len(df)}行 × {len(df.columns)}列")
+
     def load_data(self, member_df, acquired_df, skill_df, education_df, license_df):
         """
         CSVデータを読み込んで処理
+
+        Args:
+            member_df: 社員マスタDataFrame
+            acquired_df: スキル習得DataFrameframe
+            skill_df: スキルマスタDataFrame
+            education_df: 教育マスタDataFrame
+            license_df: 資格マスタDataFrame
+
+        Raises:
+            DataValidationError: 入力データの検証失敗時
         """
-        print("データ読み込み中...")
+        logger.info("データ読み込みを開始しました")
+
+        # 入力データの検証
+        self._validate_input_data(member_df, 'member_df')
+        self._validate_input_data(acquired_df, 'acquired_df')
+        self._validate_input_data(skill_df, 'skill_df')
+        self._validate_input_data(education_df, 'education_df')
+        self._validate_input_data(license_df, 'license_df')
 
         # カラム名を取得
         col_member = self.column_names.get('member', {})
@@ -301,7 +437,7 @@ class TalentAnalyzer:
         # 社員特徴量の作成
         self.create_member_features(member_df, acquired_df)
 
-        print(f"データ読み込み完了: 社員{len(self.members)}名, スキル{self.skill_matrix.shape[1]}種")
+        logger.info(f"データ読み込み完了: 社員{len(self.members)}名, スキル{self.skill_matrix.shape[1]}種")
 
         # データ品質チェック
         self._validate_data_quality(member_df, acquired_df)
@@ -403,7 +539,12 @@ class TalentAnalyzer:
 
             try:
                 all_skills[skill_code]['data'][member_code] = float(level)
-            except:
+            except (ValueError, TypeError) as e:
+                logger.debug(
+                    f"スキルレベルの変換に失敗 "
+                    f"(メンバー: {member_code}, スキル: {skill_code}, 値: {level}): {e}. "
+                    f"デフォルト値 0 を使用"
+                )
                 all_skills[skill_code]['data'][member_code] = 0
 
         # EDUCATION
@@ -516,10 +657,10 @@ class TalentAnalyzer:
         epochs_unsupervised: int, optional
             学習エポック数
         """
-        print(f"\n優秀群: {len(excellent_members)}名で学習開始")
+        logger.info(f"優秀群 {len(excellent_members)}名の学習を開始します")
 
         # グラフ構築
-        print("グラフ構築中...")
+        logger.info("グラフ構築を開始...")
         adjacency = self.gnn.build_graph(
             self.member_features,
             self.skill_matrix,
@@ -540,7 +681,7 @@ class TalentAnalyzer:
         excellent_indices = [self.member_to_idx[m] for m in excellent_members if m in self.member_to_idx]
         self.prototype = np.mean(self.embeddings[excellent_indices], axis=0)
 
-        print("学習完了")
+        logger.info(f"学習完了しました（プロトタイプ次元: {self.prototype.shape[0]}）")
 
     def analyze(self, excellent_members):
         """
@@ -681,7 +822,11 @@ class TalentAnalyzer:
             # Fisher正確検定
             try:
                 odds_ratio, p_value = fisher_exact(contingency_table)
-            except:
+            except (ValueError, ZeroDivisionError) as e:
+                logger.warning(
+                    f"Fisher検定失敗 (スキル: {skill['skill_name']}): {e}. "
+                    f"デフォルト値を使用"
+                )
                 odds_ratio, p_value = 1.0, 1.0
 
             skill['p_value'] = p_value
@@ -740,8 +885,11 @@ class TalentAnalyzer:
                     skill['p_adjusted'] = p_adjusted[i]
                     skill['significant'] = reject[i]
                     skill['significance_level'] = self._get_significance_label(p_adjusted[i])
-            except:
-                logger.warning("多重検定補正に失敗しました")
+            except (ValueError, IndexError) as e:
+                logger.warning(
+                    f"多重検定補正に失敗しました (方法: {correction_method}): {e}. "
+                    f"補正なしの p-値を使用"
+                )
                 for skill in skill_importance:
                     skill['p_adjusted'] = skill['p_value']
                     skill['significant'] = skill['p_value'] < alpha
@@ -1050,6 +1198,41 @@ class TalentAnalyzer:
 
         return metrics
 
+    def _sanitize_version(self, version: str) -> str:
+        """
+        バージョン文字列をサニタイズ（パストラバーサル対策）
+
+        許可される文字: 英数字、アンダースコア、ハイフン
+        Path traversal 試行（"..", "/" 等）を防止
+
+        Args:
+            version: バージョン文字列
+
+        Returns:
+            サニタイズされたバージョン文字列
+
+        Raises:
+            ValueError: サニタイズされたバージョンが不正な形式の場合
+        """
+        # 許可される文字のみを抽出：英数字、アンダースコア、ハイフン
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '', version)
+
+        # サニタイズ前後で変更があるかチェック
+        if sanitized != version:
+            logger.warning(
+                f"バージョン文字列をサニタイズしました: "
+                f"'{version}' → '{sanitized}' "
+                f"（不正な文字を削除）"
+            )
+
+        # 空の文字列チェック
+        if not sanitized:
+            raise ValueError(
+                f"バージョン文字列が無効です（許可される文字なし）: '{version}'"
+            )
+
+        return sanitized
+
     def save_model(self, excellent_members, version=None):
         """
         学習済みモデルを保存
@@ -1060,6 +1243,9 @@ class TalentAnalyzer:
             優秀群の社員コードリスト
         version: str, optional
             バージョン名
+
+        Raises:
+            ModelTrainingError: モデル保存に失敗した場合
         """
         versioning_config = get_config('versioning', {})
 
@@ -1073,6 +1259,13 @@ class TalentAnalyzer:
         # バージョン名の生成
         if version is None:
             version = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # バージョン文字列をサニタイズ（セキュリティ対策）
+        try:
+            version = self._sanitize_version(version)
+        except ValueError as e:
+            logger.error(f"バージョン文字列の検証失敗: {e}")
+            raise ModelTrainingError(f"無効なバージョン名: {e}") from e
 
         model_path = model_dir / f"model_{version}.pkl"
 
@@ -1123,7 +1316,18 @@ class TalentAnalyzer:
         -----------
         version: str
             バージョン名
+
+        Returns:
+        --------
+        bool: 読み込み成功時はTrue、失敗時はFalse
         """
+        # バージョン文字列をサニタイズ（セキュリティ対策）
+        try:
+            version = self._sanitize_version(version)
+        except ValueError as e:
+            logger.error(f"バージョン文字列の検証失敗: {e}")
+            return False
+
         model_dir = Path(get_config('versioning.model_dir', './models'))
         model_path = model_dir / f"model_{version}.pkl"
 
@@ -1148,8 +1352,14 @@ class TalentAnalyzer:
 
             return True
 
+        except (FileNotFoundError, IOError) as e:
+            logger.error(f"モデルファイルの読み込みに失敗しました: {e}", exc_info=True)
+            return False
+        except (KeyError, ValueError) as e:
+            logger.error(f"モデルデータが不正または欠損しています: {e}", exc_info=True)
+            return False
         except Exception as e:
-            logger.error(f"モデル読み込みエラー: {str(e)}")
+            logger.error(f"予期しないエラーが発生しました（モデル読み込み）: {e}", exc_info=True)
             return False
 
     def estimate_causal_effects(self, excellent_members):
@@ -1446,8 +1656,23 @@ class TalentAnalyzer:
                 'significant': p_value < 0.05
             }
 
+        except (ValueError, ZeroDivisionError) as e:
+            logger.warning(
+                f"スキル {skill_name} の因果推論計算エラー（数値エラー）: {e}. "
+                f"データが不適切である可能性があります"
+            )
+            return {
+                'skill_code': skill_code,
+                'skill_name': skill_name,
+                'causal_effect': None,
+                'status': 'numerical_error',
+                'interpretation': f'数値計算エラー（スキル分布が不適切）'
+            }
         except Exception as e:
-            logger.error(f"スキル {skill_name} の因果推論エラー: {str(e)}")
+            logger.error(
+                f"スキル {skill_name} の因果推論エラー（予期しないエラー）: {e}",
+                exc_info=True
+            )
             return {
                 'skill_code': skill_code,
                 'skill_name': skill_name,
