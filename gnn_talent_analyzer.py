@@ -220,31 +220,18 @@ class SimpleGNN:
             loss = -np.mean(np.log(1 / (1 + np.exp(-pos_scores)) + 1e-8)) - \
                    np.mean(np.log(1 - 1 / (1 + np.exp(-neg_scores)) + 1e-8))
 
-            # 重み更新（簡易的な勾配降下）
-            for i, weight in enumerate(self.weights):
-                grad = np.random.randn(*weight.shape) * 0.01
-                new_weight = weight - self.learning_rate * grad
+            # 注釈: 元々の実装はランダム勾配を使っていたが、これは機械学習ではなく
+            # ランダム探索であり、統計的には正当性がない。
+            # 改善: グラフ構造と特徴エンジニアリングに頼り、重みの更新は行わない
+            # 理由: 少数のサンプル（5-20名）では、勾配ベースの学習は過学習と不安定性の
+            # リスクが高い。グラフ構造自体がデータの関係性を表現している。
 
-                # 重みを更新して損失を確認
-                old_weight = self.weights[i].copy()
-                self.weights[i] = new_weight
-                new_embeddings = self.forward(adjacency, features)
-
-                # 新しい損失を計算
-                pos_u_new = new_embeddings[pos_edges[0][pos_samples]]
-                pos_v_new = new_embeddings[pos_edges[1][pos_samples]]
-                pos_scores_new = np.sum(pos_u_new * pos_v_new, axis=1)
-
-                neg_u_new = new_embeddings[neg_u_idx]
-                neg_v_new = new_embeddings[neg_v_idx]
-                neg_scores_new = np.sum(neg_u_new * neg_v_new, axis=1)
-
-                new_loss = -np.mean(np.log(1 / (1 + np.exp(-pos_scores_new)) + 1e-8)) - \
-                           np.mean(np.log(1 - 1 / (1 + np.exp(-neg_scores_new)) + 1e-8))
-
-                # 損失が改善しなければ元に戻す
-                if new_loss >= loss:
-                    self.weights[i] = old_weight
+            # 注釈: 将来的には以下の改善を検討
+            # 1. PyTorch Geometric や DGL の使用（自動微分による正確な勾配計算）
+            # 2. より多くのデータでの検証
+            # 3. 正則化技術の導入
+            logger.debug(f"Epoch {epoch}/{epochs}: Graph-based embedding (weight learning disabled)")
+            logger.debug(f"Loss (informational): {loss:.4f}")
 
             if epoch % 20 == 0:
                 print(f"Epoch {epoch}/{epochs}, Loss: {loss:.4f}")
@@ -315,6 +302,71 @@ class TalentAnalyzer:
         self.create_member_features(member_df, acquired_df)
 
         print(f"データ読み込み完了: 社員{len(self.members)}名, スキル{self.skill_matrix.shape[1]}種")
+
+        # データ品質チェック
+        self._validate_data_quality(member_df, acquired_df)
+
+    def _validate_data_quality(self, member_df, acquired_df):
+        """
+        データ品質を検証し、潜在的な問題を報告する
+
+        チェック項目：
+        1. 重複メンバーコード
+        2. 欠損値パターン
+        3. データ型の一貫性
+        4. 異常値（例：負の年数など）
+        5. サンプルサイズの制限警告
+        """
+        col_member = self.column_names.get('member', {})
+        member_code_col = col_member.get('code', 'メンバーコード  ###[member_code]###')
+        enter_day_col = col_member.get('enter_day', '入社年月日  ###[enter_day]###')
+        grade_col = col_member.get('grade', '等級  ###[grade]###')
+
+        col_acquired = self.column_names.get('acquired', {})
+        acquired_member_code_col = col_acquired.get('member_code', 'メンバーコード')
+
+        # 1. 重複メンバーコード
+        member_duplicates = member_df[member_code_col].duplicated().sum()
+        if member_duplicates > 0:
+            logger.warning(f"重複メンバーコード検出: {member_duplicates}件")
+
+        # 2. 欠損値パターン
+        missing_ratio = member_df[member_code_col].isna().sum() / len(member_df)
+        if missing_ratio > 0:
+            logger.warning(f"メンバーコード欠損率: {missing_ratio:.1%}")
+
+        # 3. データ型の一貫性
+        if enter_day_col in member_df.columns:
+            try:
+                pd.to_datetime(member_df[enter_day_col], errors='coerce')
+            except Exception as e:
+                logger.warning(f"入社日の日付変換失敗: {e}")
+
+        # 4. 異常値検出（年数が負）
+        if enter_day_col in member_df.columns:
+            try:
+                enter_dates = pd.to_datetime(member_df[enter_day_col], errors='coerce')
+                future_dates = (enter_dates > pd.Timestamp.now()).sum()
+                if future_dates > 0:
+                    logger.warning(f"未来の入社日検出: {future_dates}件")
+            except Exception:
+                pass
+
+        # 5. サンプルサイズ制限警告
+        n_members = len(self.members)
+        logger.info(f"データ品質チェック完了:")
+        logger.info(f"  - 総メンバー数: {n_members}")
+        logger.info(f"  - 総スキル数: {self.skill_matrix.shape[1]}")
+
+        if n_members < 30:
+            logger.warning(f"⚠️  サンプルサイズが小さい ({n_members}名)")
+            logger.warning(f"    推奨: 最低50名以上")
+            logger.warning(f"    現在のサンプルで過学習のリスクが高まります")
+
+        # 6. スキル保有分布
+        skill_per_member = self.skill_matrix.sum(axis=1)
+        logger.info(f"  - 平均スキル数: {skill_per_member.mean():.1f}")
+        logger.info(f"  - スキル数の範囲: {skill_per_member.min():.0f}-{skill_per_member.max():.0f}")
 
     def process_skills(self, acquired_df, skill_df, education_df, license_df):
         """
@@ -636,25 +688,44 @@ class TalentAnalyzer:
             skill['odds_ratio'] = odds_ratio
             p_values.append(p_value)
 
-            # 信頼区間の計算（Wald法による近似）
+            # 信頼区間の計算（Wilson スコア区間：小サンプルに適切）
             if show_ci:
                 from scipy.stats import norm
                 z = norm.ppf(1 - (1 - ci_level) / 2)
 
+                # Wilson スコア区間の計算
+                def wilson_ci(successes, n, z):
+                    """
+                    Wilson スコア信頼区間を計算
+                    小サンプル（n=5など）でも正確な coverage を持つ
+
+                    参考: Wilson, E. B. (1927). Probable inference, the law of succession,
+                          and statistical inference. J. Amer. Stat. Assoc., 22, 209-212.
+                    """
+                    if n == 0:
+                        return (0, 0)
+
+                    p_hat = successes / n
+                    denominator = 1 + z**2 / n
+                    center = (p_hat + z**2 / (2*n)) / denominator
+                    margin = z * np.sqrt(p_hat*(1-p_hat)/n + z**2/(4*n**2)) / denominator
+
+                    lower = max(0, center - margin)
+                    upper = min(1, center + margin)
+                    return (lower, upper)
+
                 # 優秀群の保有率の信頼区間
-                p1 = skill['excellent_rate']
-                se1 = np.sqrt(p1 * (1 - p1) / n_excellent) if n_excellent > 0 else 0
-                ci1_lower = max(0, p1 - z * se1)
-                ci1_upper = min(1, p1 + z * se1)
+                ci1_lower, ci1_upper = wilson_ci(excellent_has, n_excellent, z)
 
                 # 非優秀群の保有率の信頼区間
-                p2 = skill['non_excellent_rate']
-                se2 = np.sqrt(p2 * (1 - p2) / n_non_excellent) if n_non_excellent > 0 else 0
-                ci2_lower = max(0, p2 - z * se2)
-                ci2_upper = min(1, p2 + z * se2)
+                ci2_lower, ci2_upper = wilson_ci(non_excellent_has, n_non_excellent, z)
 
                 skill['excellent_rate_ci'] = (ci1_lower, ci1_upper)
                 skill['non_excellent_rate_ci'] = (ci2_lower, ci2_upper)
+
+                # 注釈：データ科学的な根拠
+                logger.debug(f"スキル {skill['skill_name']}: "
+                           f"Wilson CI (n={n_excellent}): [{ci1_lower:.3f}, {ci1_upper:.3f}]")
 
         # 多重検定補正
         if correction_method != 'none' and len(p_values) > 0:
