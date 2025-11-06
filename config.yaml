@@ -152,3 +152,87 @@ logging:
   max_bytes: 10485760  # 10MB
   backup_count: 5
   console_logging: true
+
+# 拡張因果推論設定
+advanced_causal_inference:
+  # 感度分析
+  sensitivity_analysis:
+    enabled: true
+    rosenbaum_gamma_values: [1.0, 1.5, 2.0, 2.5, 3.0]
+    e_value_threshold: 2.0  # この値以上で頑健とみなす
+
+  # クラスター頑健推定
+  cluster_robust:
+    enabled: true
+    min_clusters: 3  # 最低クラスター数
+    icc_warning_threshold: 0.15  # この値以上でクラスタリング効果が大きいと警告
+
+  # PSM診断
+  psm_diagnostics:
+    enabled: true
+    smd_threshold: 0.1  # バランスの良い閾値
+    overlap_method: "minmax"  # "minmax" or "percentile"
+    min_overlap_percentage: 75  # 最低重なり割合
+
+  # DID分析
+  did_analysis:
+    enabled: true
+    parallel_trends_pvalue: 0.05
+    use_staggered_did: true  # 異なる時点での処置を許可
+
+  # Causal Forest
+  causal_forest:
+    enabled: true
+    n_estimators: 100
+    min_samples_leaf: 5
+    max_depth: null
+    n_subgroups: 3  # 特定するサブグループ数
+
+# ベースラインモデル比較設定
+baseline_comparison:
+  enabled: true
+  models:
+    logistic_regression:
+      enabled: true
+      max_iter: 1000
+      class_weight: "balanced"
+    random_forest:
+      enabled: true
+      n_estimators: 100
+      max_depth: 10
+      min_samples_split: 5
+    xgboost:
+      enabled: true
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+
+# クロスバリデーション設定
+cross_validation:
+  enabled: true
+  method: "stratified"  # "stratified", "loocv", "nested"
+  n_splits: 5
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1"
+    - "roc_auc"
+  nested_cv:
+    enabled: false  # 計算コスト高
+    n_outer_splits: 5
+    n_inner_splits: 3
+
+# 可視化設定
+visualization:
+  enabled: true
+  love_plot:
+    enabled: true
+    figsize: [10, 6]
+  calibration_plot:
+    enabled: true
+    n_bins: 10
+  did_plots:
+    enabled: true
+  save_plots: true
+  output_dir: "./plots"
