@@ -67,6 +67,14 @@ if 'interaction_results' not in st.session_state:
     st.session_state.interaction_results = None
 if 'member_df' not in st.session_state:
     st.session_state.member_df = None
+if 'gnn_trained' not in st.session_state:
+    st.session_state.gnn_trained = False
+if 'skill_profile' not in st.session_state:
+    st.session_state.skill_profile = None
+if 'hte_results' not in st.session_state:
+    st.session_state.hte_results = None
+if 'insights' not in st.session_state:
+    st.session_state.insights = None
 
 # タイトル
 st.title(f"{get_config('ui.page_icon', '🎯')} {get_config('ui.page_title', 'GNN優秀人材分析システム')}")
@@ -239,25 +247,14 @@ if st.session_state.data_loaded:
 
     if st.button("🚀 分析開始", type="primary", disabled=(len(selected_members) < MIN_EXCELLENT)):
         try:
-            with st.spinner("GNNモデルの学習と分析を実行中..."):
-                # Layer 1-3 逆向き因果推論分析を実行
+            with st.spinner("GNNモデルの学習を実行中..."):
+                # GNNモデルの学習のみ
                 analyzer.train(selected_members, epochs_unsupervised=epochs)
 
-                # Layer 1: 優秀者スキルプロファイル分析
-                skill_profile = analyzer.analyze_skill_profile_of_excellent_members(selected_members)
+                # 学習済みフラグを保存
+                st.session_state.gnn_trained = True
 
-                # Layer 2: 個別メンバーの異質的処置効果推定
-                hte_results = analyzer.estimate_heterogeneous_treatment_effects(selected_members, skill_profile)
-
-                # Layer 3: 経営的インサイト生成
-                insights = analyzer.generate_comprehensive_insights(selected_members, skill_profile, hte_results)
-
-                # セッション状態に保存
-                st.session_state.skill_profile = skill_profile
-                st.session_state.hte_results = hte_results
-                st.session_state.insights = insights
-
-            st.success("✅ Layer 1-3 分析完了！")
+            st.success("✅ GNN学習完了！次に「3️⃣ 逆向き因果推論分析」で分析を実行してください。")
         except ModelTrainingError as e:
             logger.error(f"モデル学習エラー: {e}", exc_info=True)
             st.error(
@@ -267,30 +264,96 @@ if st.session_state.data_loaded:
                 f"- エポック数を減らしてみてください\n"
                 f"- 優秀人材の人数を増やしてみてください"
             )
-        except (CausalInferenceError, DataValidationError) as e:
-            logger.error(f"分析エラー: {e}", exc_info=True)
-            st.error(
-                f"❌ Layer 1-3 分析の実行中にエラーが発生しました。\n"
-                f"詳細: {str(e)}\n\n"
-                f"対策:\n"
-                f"- 優秀人材の人数を増やしてみてください（推奨: 5-10名）\n"
-                f"- 対象社員の総数が十分か確認してください（推奨: 50名以上）"
-            )
-        except AnalysisError as e:
-            logger.error(f"分析エラー: {e}", exc_info=True)
-            st.error(
-                f"❌ 分析中にエラーが発生しました。\n"
-                f"詳細: {str(e)}"
-            )
         except Exception as e:
             logger.error(f"予期しないエラーが発生しました: {e}", exc_info=True)
             st.error(
                 f"❌ 予期しないエラーが発生しました。\n"
-                f"詳細: {str(e)}\n\n"
-                f"ログ出力:"
+                f"詳細: {str(e)}"
             )
             import traceback
             st.error(traceback.format_exc())
+
+    st.markdown("---")
+
+    # 3️⃣ 逆向き因果推論分析セクション
+    st.header("3️⃣ 逆向き因果推論分析（Layer 1-3）")
+
+    if not st.session_state.get('gnn_trained', False):
+        st.info("⚠️ まず上の「2️⃣ 分析実行」でGNN学習を完了してください。")
+    else:
+        with st.expander("📚 Layer 1-3 分析を実行", expanded=True):
+
+            # スキル保有数上位自動選択
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown("**優秀群の選択方法：**")
+            with col2:
+                auto_select_n = st.number_input(
+                    "上位N名",
+                    min_value=3,
+                    max_value=20,
+                    value=10,
+                    step=1,
+                    help="スキル保有数上位N名を自動選択"
+                )
+                if st.button("🎯 自動選択", help="スキル保有数上位のメンバーを自動選択"):
+                    top_members = st.session_state.analyzer.get_top_skill_holders(top_n=auto_select_n)
+                    st.session_state.auto_selected_members = top_members
+                    st.success(f"✅ スキル保有数上位{len(top_members)}名を自動選択しました")
+
+            # 優秀群の選択
+            default_selection = st.session_state.get('auto_selected_members', [])
+            selected_excellent = st.multiselect(
+                "優秀群として分析する社員を選択（最低3名）",
+                st.session_state.analyzer.members,
+                default=default_selection,
+                help="統計的に有意な結果を得るため、5-10名の選択を推奨"
+            )
+
+            if len(selected_excellent) >= 3 and st.button("🚀 Layer 1-3 分析を実行"):
+                try:
+                    with st.spinner("Layer 1-3 分析を実行中...（数秒かかります）"):
+
+                        # Layer 1: 優秀者特性の逆向き分析
+                        logger.info(f"Layer 1を実行中: {len(selected_excellent)}人の優秀群を分析")
+                        skill_profile = st.session_state.analyzer.analyze_skill_profile_of_excellent_members(
+                            selected_excellent
+                        )
+
+                        # Layer 2: 個別メンバーへの因果効果推定
+                        logger.info("Layer 2を実行中: 個別メンバーの因果効果を推定")
+                        hte_results = st.session_state.analyzer.estimate_heterogeneous_treatment_effects(
+                            selected_excellent,
+                            skill_profile
+                        )
+
+                        # Layer 3: 説明可能性の強化
+                        logger.info("Layer 3を実行中: 包括的な分析洞察を生成")
+                        insights = st.session_state.analyzer.generate_comprehensive_insights(
+                            selected_excellent,
+                            skill_profile,
+                            hte_results
+                        )
+
+                        # セッション状態に保存
+                        st.session_state.skill_profile = skill_profile
+                        st.session_state.hte_results = hte_results
+                        st.session_state.insights = insights
+
+                        st.success("✅ Layer 1-3 分析が完了しました！")
+
+                except (CausalInferenceError, DataValidationError) as e:
+                    logger.error(f"因果推論エラー: {e}", exc_info=True)
+                    st.error(
+                        f"❌ Layer 1-3 分析の実行中にエラーが発生しました。\n"
+                        f"詳細: {str(e)}\n\n"
+                        f"対策:\n"
+                        f"- 優秀人材の人数を増やしてみてください（推奨: 5-10名）\n"
+                        f"- 対象社員の総数が十分か確認してください（推奨: 50名以上）"
+                    )
+                except Exception as e:
+                    logger.error(f"分析実行エラー: {e}", exc_info=True)
+                    st.error(f"❌ 分析中にエラーが発生しました: {str(e)}")
 
     # 分析結果の表示
     if hasattr(st.session_state, 'insights') and st.session_state.insights is not None:
