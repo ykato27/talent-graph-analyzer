@@ -1180,8 +1180,15 @@ class TalentAnalyzer:
             top_5 = skill_effects_sorted[:5]
 
             hte_results[member_code] = {
+                'member_id': member_code,
+                'is_excellent': bool(is_excellent[member_idx]),
                 'skills': skill_effects,
-                'top_5_skills': top_5
+                'top_5_skills': skill_effects[:5],
+                'summary': self._generate_member_summary(
+                    member_code,
+                    skill_effects[:3],
+                    is_excellent[member_idx]
+                )
             }
 
         logger.info(f"HTE推定完了（GNN版）: {len(hte_results)}メンバー")
