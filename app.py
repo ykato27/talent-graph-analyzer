@@ -304,7 +304,7 @@ if st.session_state.data_loaded:
             # 優秀群の選択
             selected_excellent = st.multiselect(
                 "優秀群として分析する社員を選択（最低3名）",
-                st.session_state.member_df['メンバーコード'].unique(),
+                st.session_state.analyzer.members,
                 help="統計的に有意な結果を得るため、5-10名の選択を推奨"
             )
 
