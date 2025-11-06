@@ -190,7 +190,6 @@ if selected_feature == "📁 データ管理":
                     st.session_state.data_loaded = True
 
                     st.success("✅ データ読み込み完了！")
-                    st.balloons()
 
             except pd.errors.ParserError as e:
                 logger.error(f"CSV解析エラー: {e}", exc_info=True)
