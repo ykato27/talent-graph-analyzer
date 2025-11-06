@@ -88,77 +88,129 @@ if 'insights_trad' not in st.session_state:
 st.title(f"{get_config('ui.page_icon', '🎯')} {get_config('ui.page_title', 'GNN優秀人材分析システム')}")
 st.markdown("---")
 
-# サイドバー
-st.sidebar.header("📁 データアップロード")
+# サイドバー: 機能選択メニュー
+st.sidebar.title("📋 機能メニュー")
+st.sidebar.markdown("分析したい機能を選択してください")
 
-# ファイルアップロード
-uploaded_files = {
-    'member': st.sidebar.file_uploader("社員マスタ (member_skillnote.csv)", type=['csv']),
-    'acquired': st.sidebar.file_uploader("スキル習得データ (acquiredCompetenceLevel.csv)", type=['csv']),
-    'skill': st.sidebar.file_uploader("スキルマスタ (skill_skillnote.csv)", type=['csv']),
-    'education': st.sidebar.file_uploader("教育マスタ (education_skillnote.csv)", type=['csv']),
-    'license': st.sidebar.file_uploader("資格マスタ (license_skillnote.csv)", type=['csv'])
-}
+selected_feature = st.sidebar.radio(
+    "機能を選択",
+    [
+        "📁 データ管理",
+        "🔬 GNN埋め込み分析（高度）",
+        "📊 従来版因果推論（シンプル）"
+    ],
+    index=0
+)
 
-# データ読み込みボタン
-if st.sidebar.button("📊 データ読み込み"):
-    if all(uploaded_files.values()):
-        try:
-            with st.spinner("データ読み込み中..."):
-                # CSVファイルを読み込み
-                try:
+st.sidebar.markdown("---")
+
+# データ読み込み状態の表示
+if st.session_state.data_loaded:
+    st.sidebar.success("✅ データ読み込み済み")
+    analyzer = st.session_state.analyzer
+    st.sidebar.metric("総社員数", len(analyzer.members))
+    st.sidebar.metric("スキル種類数", len(analyzer.skill_codes))
+else:
+    st.sidebar.warning("⚠️ データ未読み込み")
+    st.sidebar.info("👆 「📁 データ管理」を選択して\nデータをアップロードしてください")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**📖 機能説明**")
+
+if selected_feature == "📁 データ管理":
+    st.sidebar.info(
+        "CSVファイルをアップロードし、\n"
+        "データを読み込みます"
+    )
+elif selected_feature == "🔬 GNN埋め込み分析（高度）":
+    st.sidebar.info(
+        "GNNで高次元の埋め込み表現を学習し、\n"
+        "より精度の高い因果推論分析を行います\n\n"
+        "📌 GNN学習が必要です"
+    )
+else:
+    st.sidebar.info(
+        "GNN学習不要で生データから\n"
+        "直接因果推論分析を行います\n\n"
+        "📌 シンプルで解釈しやすい分析"
+    )
+
+st.sidebar.markdown("---")
+
+# メインコンテンツ: 選択された機能に応じた表示
+
+# ========================================
+# 📁 データ管理画面
+# ========================================
+if selected_feature == "📁 データ管理":
+    st.header("📁 データ管理")
+
+    st.markdown("---")
+    st.subheader("1️⃣ CSVファイルのアップロード")
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        member_file = st.file_uploader("社員マスタ (member_skillnote.csv)", type=['csv'], key="member_upload")
+        acquired_file = st.file_uploader("スキル習得データ (acquiredCompetenceLevel.csv)", type=['csv'], key="acquired_upload")
+        skill_file = st.file_uploader("スキルマスタ (skill_skillnote.csv)", type=['csv'], key="skill_upload")
+
+    with col2:
+        education_file = st.file_uploader("教育マスタ (education_skillnote.csv)", type=['csv'], key="education_upload")
+        license_file = st.file_uploader("資格マスタ (license_skillnote.csv)", type=['csv'], key="license_upload")
+
+    st.markdown("---")
+    st.subheader("2️⃣ データ読み込み")
+
+    uploaded_files = {
+        'member': member_file,
+        'acquired': acquired_file,
+        'skill': skill_file,
+        'education': education_file,
+        'license': license_file
+    }
+
+    if st.button("📊 データ読み込み", type="primary", disabled=not all(uploaded_files.values())):
+        if all(uploaded_files.values()):
+            try:
+                with st.spinner("データ読み込み中..."):
+                    # CSVファイルを読み込み
                     member_df = pd.read_csv(uploaded_files['member'], encoding=FILE_ENCODING)
                     acquired_df = pd.read_csv(uploaded_files['acquired'], encoding=FILE_ENCODING)
                     skill_df = pd.read_csv(uploaded_files['skill'], encoding=FILE_ENCODING)
                     education_df = pd.read_csv(uploaded_files['education'], encoding=FILE_ENCODING)
                     license_df = pd.read_csv(uploaded_files['license'], encoding=FILE_ENCODING)
-                except pd.errors.ParserError as e:
-                    logger.error(f"CSV解析エラー: {e}", exc_info=True)
-                    st.sidebar.error(
-                        f"❌ CSV形式が無効です。カラム名と型を確認してください。\n"
-                        f"詳細: {str(e)}"
-                    )
-                    raise DataLoadingError(f"CSV解析失敗: {e}") from e
-                except FileNotFoundError as e:
-                    logger.error(f"ファイルが見つかりません: {e}", exc_info=True)
-                    st.sidebar.error(f"❌ ファイルが見つかりません: {str(e)}")
-                    raise DataLoadingError(f"ファイルが見つかりません: {e}") from e
 
-                # アナライザーの初期化
-                analyzer = TalentAnalyzer()
-                analyzer.load_data(member_df, acquired_df, skill_df, education_df, license_df)
+                    # アナライザーの初期化
+                    analyzer = TalentAnalyzer()
+                    analyzer.load_data(member_df, acquired_df, skill_df, education_df, license_df)
 
-                st.session_state.analyzer = analyzer
-                st.session_state.member_df = member_df
-                st.session_state.data_loaded = True
+                    st.session_state.analyzer = analyzer
+                    st.session_state.member_df = member_df
+                    st.session_state.data_loaded = True
 
-                st.sidebar.success("✅ データ読み込み完了")
-        except DataValidationError as e:
-            logger.error(f"データ検証エラー: {e}", exc_info=True)
-            st.sidebar.error(f"❌ データ検証エラー: {str(e)}")
-        except DataLoadingError as e:
-            logger.error(f"データ読み込みエラー: {e}", exc_info=True)
-            st.sidebar.error(f"❌ データ読み込みエラー: {str(e)}")
-        except Exception as e:
-            logger.error(f"予期しないエラーが発生しました: {e}", exc_info=True)
-            st.sidebar.error(
-                f"❌ 予期しないエラーが発生しました。\n"
-                f"ファイル形式とデータ内容を確認してください。\n"
-                f"詳細: {str(e)}"
-            )
-    else:
-        st.sidebar.warning("⚠️ すべてのCSVファイルをアップロードしてください")
+                    st.success("✅ データ読み込み完了！")
+                    st.balloons()
 
-st.sidebar.markdown("---")
+            except pd.errors.ParserError as e:
+                logger.error(f"CSV解析エラー: {e}", exc_info=True)
+                st.error(f"❌ CSV形式が無効です。カラム名と型を確認してください。\n詳細: {str(e)}")
+            except (DataValidationError, DataLoadingError) as e:
+                logger.error(f"データエラー: {e}", exc_info=True)
+                st.error(f"❌ データエラー: {str(e)}")
+            except Exception as e:
+                logger.error(f"予期しないエラー: {e}", exc_info=True)
+                st.error(f"❌ 予期しないエラーが発生しました: {str(e)}")
+        else:
+            st.warning("⚠️ すべてのCSVファイルをアップロードしてください")
 
-# メインコンテンツ
-if st.session_state.data_loaded:
-    analyzer = st.session_state.analyzer
+    # データ概要表示
+    if st.session_state.data_loaded:
+        st.markdown("---")
+        st.subheader("3️⃣ データ概要")
+        analyzer = st.session_state.analyzer
 
-    # データ概要
-    with st.expander("📊 データ概要", expanded=False):
         col1, col2, col3, col4 = st.columns(4)
-
         with col1:
             st.metric("総社員数", len(analyzer.members))
         with col2:
@@ -170,490 +222,40 @@ if st.session_state.data_loaded:
             sparsity = 1 - np.count_nonzero(analyzer.skill_matrix) / analyzer.skill_matrix.size
             st.metric("データスパース性", f"{sparsity*100:.1f}%")
 
-    st.markdown("---")
+# ========================================
+# 🔬 GNN埋め込み分析画面
+# ========================================
+elif selected_feature == "🔬 GNN埋め込み分析（高度）":
+    st.header("🔬 GNN埋め込み分析（高度な分析）")
 
-    # 優秀人材選択
-    st.header("1️⃣ 優秀人材の選択")
-
-    # 社員リストの表示
-    member_list = []
-    for member_code in analyzer.members:
-        member_name = analyzer.member_names.get(member_code, '不明')
-        n_skills = int(np.sum(analyzer.skill_matrix[analyzer.member_to_idx[member_code]] > 0))
-        member_list.append({
-            'コード': member_code,
-            '名前': member_name,
-            'スキル保有数': n_skills
-        })
-
-    member_df_display = pd.DataFrame(member_list)
-
-    # 選択方法
-    selection_method = st.radio(
-        "選択方法",
-        ["手動選択", "スキル保有数上位を自動選択"],
-        horizontal=True
-    )
-
-    if selection_method == "手動選択":
-        # マルチセレクト
-        selected_members = st.multiselect(
-            f"優秀な社員を選択してください（5-{MAX_EXCELLENT_RECOMMENDED}名推奨）",
-            options=member_df_display['コード'].tolist(),
-            format_func=lambda x: f"{member_df_display[member_df_display['コード']==x]['名前'].values[0]} ({x})"
-        )
+    if not st.session_state.data_loaded:
+        st.warning("⚠️ 先に「📁 データ管理」でデータをアップロードしてください")
     else:
-        # 上位N名を自動選択
-        n_top = st.slider(
-            "上位何名を選択しますか？",
-            min_value=MIN_EXCELLENT,
-            max_value=MAX_EXCELLENT_RECOMMENDED,
-            value=10
-        )
-        top_members = member_df_display.nlargest(n_top, 'スキル保有数')
-        selected_members = top_members['コード'].tolist()
-
-        st.info(f"スキル保有数上位{n_top}名を自動選択しました")
-        st.dataframe(top_members, use_container_width=True)
-
-    st.markdown(f"**選択された社員数: {len(selected_members)}名**")
-
-    if len(selected_members) < MIN_EXCELLENT:
-        st.warning(f"⚠️ 最低{MIN_EXCELLENT}名以上の優秀人材を選択してください")
-    elif len(selected_members) > MAX_EXCELLENT_RECOMMENDED:
-        st.warning(f"⚠️ {MAX_EXCELLENT_RECOMMENDED}名以下での選択を推奨します")
-
-    st.markdown("---")
-
-    # 分析実行
-    st.header("2️⃣ 分析実行")
-
-    col1, col2 = st.columns([1, 3])
-
-    with col1:
-        epochs = st.number_input(
-            "学習エポック数",
-            min_value=MIN_EPOCHS,
-            max_value=MAX_EPOCHS,
-            value=DEFAULT_EPOCHS,
-            step=50,
-            help="学習の反復回数。多いほど精度が上がりますが時間がかかります"
+        st.info(
+            "### 🚧 この画面は次のバージョンで実装予定です\n\n"
+            "**実装予定の機能：**\n"
+            "1. 優秀人材の選択\n"
+            "2. GNNモデルの学習\n"
+            "3. GNN埋め込みを使った逆向き因果推論\n"
+            "4. 詳細な分析結果の表示"
         )
 
-    with col2:
-        epoch_recs = get_config('ui.epoch_recommendations', {})
-        small = epoch_recs.get('small_group', [50, 100])
-        medium = epoch_recs.get('medium_group', [100, 200])
-        large = epoch_recs.get('large_group', [200, 300])
+# ========================================
+# 📊 従来版因果推論画面
+# ========================================
+else:  # 従来版因果推論
+    st.header("📊 従来版因果推論（シンプル版）")
 
-        st.info(f"""
-        **推奨設定**
-        - 優秀群5名以下: {small[0]}-{small[1]}エポック
-        - 優秀群10名程度: {medium[0]}-{medium[1]}エポック
-        - 優秀群20名以上: {large[0]}-{large[1]}エポック
-        """)
-
-    if st.button("🚀 分析開始", type="primary", disabled=(len(selected_members) < MIN_EXCELLENT)):
-        try:
-            with st.spinner("GNNモデルの学習を実行中..."):
-                # GNNモデルの学習のみ
-                analyzer.train(selected_members, epochs_unsupervised=epochs)
-
-                # 学習済みフラグを保存
-                st.session_state.gnn_trained = True
-
-            st.success("✅ GNN学習完了！次に「3️⃣ 逆向き因果推論分析」で分析を実行してください。")
-        except ModelTrainingError as e:
-            logger.error(f"モデル学習エラー: {e}", exc_info=True)
-            st.error(
-                f"❌ モデル学習中にエラーが発生しました。\n"
-                f"詳細: {str(e)}\n\n"
-                f"対策:\n"
-                f"- エポック数を減らしてみてください\n"
-                f"- 優秀人材の人数を増やしてみてください"
-            )
-        except Exception as e:
-            logger.error(f"予期しないエラーが発生しました: {e}", exc_info=True)
-            st.error(
-                f"❌ 予期しないエラーが発生しました。\n"
-                f"詳細: {str(e)}"
-            )
-            import traceback
-            st.error(traceback.format_exc())
-
-    st.markdown("---")
-
-    # 3️⃣ GNN埋め込みを使った逆向き因果推論分析
-    st.header("3️⃣ GNN埋め込みを使った逆向き因果推論（高度な分析）")
-    st.info("💡 GNN学習で得られた高次元の埋め込み表現を活用し、より精度の高い個別効果推定を行います")
-
-    if not st.session_state.get('gnn_trained', False):
-        st.warning("⚠️ まず上の「2️⃣ 分析実行」でGNN学習を完了してください。")
+    if not st.session_state.data_loaded:
+        st.warning("⚠️ 先に「📁 データ管理」でデータをアップロードしてください")
     else:
-        with st.expander("📚 GNN版 Layer 1-3 分析を実行", expanded=True):
-
-            # スキル保有数上位自動選択
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown("**優秀群の選択方法：**")
-            with col2:
-                auto_select_n = st.number_input(
-                    "上位N名",
-                    min_value=3,
-                    max_value=20,
-                    value=10,
-                    step=1,
-                    help="スキル保有数上位N名を自動選択"
-                )
-                if st.button("🎯 自動選択", help="スキル保有数上位のメンバーを自動選択"):
-                    top_members = st.session_state.analyzer.get_top_skill_holders(top_n=auto_select_n)
-                    st.session_state.auto_selected_members = top_members
-                    st.success(f"✅ スキル保有数上位{len(top_members)}名を自動選択しました")
-
-            # 優秀群の選択
-            default_selection = st.session_state.get('auto_selected_members', [])
-            selected_excellent = st.multiselect(
-                "優秀群として分析する社員を選択（最低3名）",
-                st.session_state.analyzer.members,
-                default=default_selection,
-                help="統計的に有意な結果を得るため、5-10名の選択を推奨"
-            )
-
-            if len(selected_excellent) >= 3 and st.button("🚀 GNN版 Layer 1-3 分析を実行", key="gnn_analysis"):
-                try:
-                    with st.spinner("GNN版 Layer 1-3 分析を実行中...（GNN埋め込みを活用）"):
-
-                        # Layer 1: 優秀者特性の逆向き分析
-                        logger.info(f"Layer 1を実行中: {len(selected_excellent)}人の優秀群を分析")
-                        skill_profile = st.session_state.analyzer.analyze_skill_profile_of_excellent_members(
-                            selected_excellent
-                        )
-
-                        # Layer 2: 個別メンバーへの因果効果推定（GNN版）
-                        logger.info("Layer 2を実行中: GNN埋め込みを使った個別メンバーの因果効果を推定")
-                        hte_results = st.session_state.analyzer.estimate_heterogeneous_treatment_effects_with_gnn(
-                            selected_excellent,
-                            skill_profile
-                        )
-
-                        # Layer 3: 説明可能性の強化
-                        logger.info("Layer 3を実行中: 包括的な分析洞察を生成")
-                        insights = st.session_state.analyzer.generate_comprehensive_insights(
-                            selected_excellent,
-                            skill_profile,
-                            hte_results
-                        )
-
-                        # セッション状態に保存（GNN版）
-                        st.session_state.skill_profile_gnn = skill_profile
-                        st.session_state.hte_results_gnn = hte_results
-                        st.session_state.insights_gnn = insights
-
-                        st.success("✅ GNN版 Layer 1-3 分析が完了しました！")
-
-                except (CausalInferenceError, DataValidationError) as e:
-                    logger.error(f"因果推論エラー: {e}", exc_info=True)
-                    st.error(
-                        f"❌ Layer 1-3 分析の実行中にエラーが発生しました。\n"
-                        f"詳細: {str(e)}\n\n"
-                        f"対策:\n"
-                        f"- 優秀人材の人数を増やしてみてください（推奨: 5-10名）\n"
-                        f"- 対象社員の総数が十分か確認してください（推奨: 50名以上）"
-                    )
-                except Exception as e:
-                    logger.error(f"GNN分析実行エラー: {e}", exc_info=True)
-                    st.error(f"❌ GNN分析中にエラーが発生しました: {str(e)}")
-
-    # GNN版分析結果の表示
-    if hasattr(st.session_state, 'insights_gnn') and st.session_state.insights_gnn is not None:
-        insights = st.session_state.insights_gnn
-        skill_profile = st.session_state.skill_profile_gnn
-        hte_results = st.session_state.hte_results_gnn
-
-        st.markdown("---")
-
-        # Layer 3の結果を表示
-        st.markdown(insights['executive_summary'])
-
-        # タブで結果を分割表示
-        analysis_tabs = st.tabs([
-            "🎯 優秀者スキルプロファイル",
-            "👥 メンバー別改善提案",
-            "🔗 スキル相乗効果"
-        ])
-
-        # Tab 1: スキルプロファイル（Layer 1）
-        with analysis_tabs[0]:
-            st.subheader("優秀者が持つべきスキル TOP 10")
-
-            top_10_skills = skill_profile[:10]
-
-            for idx, skill in enumerate(top_10_skills, 1):
-                with st.expander(
-                    f"{idx}. {skill['skill_name']} "
-                    f"({skill['importance']*100:+.1f}% 差分)"
-                ):
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        st.metric(
-                            "優秀群での習得率",
-                            f"{skill['p_excellent']*100:.0f}%",
-                            f"信頼区間: {skill['ci_excellent'][0]*100:.0f}%-{skill['ci_excellent'][1]*100:.0f}%"
-                        )
-                        st.metric(
-                            "非優秀群での習得率",
-                            f"{skill['p_control']*100:.0f}%",
-                            f"信頼区間: {skill['ci_control'][0]*100:.0f}%-{skill['ci_control'][1]*100:.0f}%"
-                        )
-
-                    with col2:
-                        st.metric(
-                            "重要度（差分）",
-                            f"{skill['importance']*100:+.1f}%"
-                        )
-                        st.metric(
-                            "統計的有意性",
-                            "有意" if skill['significant'] else "有意でない",
-                            f"p-value: {skill['p_value']:.4f}"
-                        )
-
-                    st.info(skill['interpretation'])
-
-        # Tab 2: メンバー別改善提案（Layer 2）
-        with analysis_tabs[1]:
-            st.subheader("メンバー別改善提案（TOP 20）")
-
-            recommendations = insights['member_recommendations'][:20]
-
-            for rec in recommendations:
-                with st.expander(
-                    f"{rec['member_id']}: "
-                    f"改善期待値 {rec['estimated_improvement']*100:+.1f}%"
-                ):
-                    st.write(rec['summary'])
-
-                    for skill in rec['priority_skills']:
-                        col1, col2 = st.columns([2, 1])
-
-                        with col1:
-                            st.write(f"**{skill['rank']}. {skill['skill_name']}**")
-                            st.caption(skill['reasoning'])
-
-                        with col2:
-                            st.metric(
-                                "信頼度",
-                                skill['confidence'],
-                                f"{skill['expected_effect']*100:+.1f}%"
-                            )
-
-        # Tab 3: スキル相乗効果
-        with analysis_tabs[2]:
-            st.subheader("スキル相乗効果の可能性")
-
-            synergies = insights['skill_combinations']
-
-            if synergies:
-                df_synergies = pd.DataFrame([
-                    {
-                        'スキル組み合わせ': s['skill_combination'],
-                        'そのスキル組を習得者': s['member_count_with_both'],
-                        'ステータス': s['status']
-                    }
-                    for s in synergies
-                ])
-
-                st.dataframe(df_synergies, use_container_width=True)
-            else:
-                st.info("相乗効果が検出されませんでした")
-
-    st.markdown("---")
-
-    # 4️⃣ 従来の逆向き因果推論分析（GNN不要）
-    st.header("4️⃣ 従来の逆向き因果推論（シンプル版）")
-    st.info("💡 GNN学習不要。生データから直接分析します。より単純で解釈しやすい分析です")
-
-    if st.session_state.data_loaded and st.session_state.analyzer is not None:
-        with st.expander("📚 従来版 Layer 1-3 分析を実行", expanded=True):
-
-            # スキル保有数上位自動選択
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown("**優秀群の選択方法：**")
-            with col2:
-                auto_select_n_trad = st.number_input(
-                    "上位N名",
-                    min_value=3,
-                    max_value=20,
-                    value=10,
-                    step=1,
-                    help="スキル保有数上位N名を自動選択",
-                    key="traditional_auto_select_n"
-                )
-                if st.button("🎯 自動選択", help="スキル保有数上位のメンバーを自動選択", key="traditional_auto_select"):
-                    top_members = st.session_state.analyzer.get_top_skill_holders(top_n=auto_select_n_trad)
-                    st.session_state.auto_selected_members_trad = top_members
-                    st.success(f"✅ スキル保有数上位{len(top_members)}名を自動選択しました")
-
-            # 優秀群の選択
-            default_selection_trad = st.session_state.get('auto_selected_members_trad', [])
-            selected_excellent_trad = st.multiselect(
-                "優秀群として分析する社員を選択（最低3名）",
-                st.session_state.analyzer.members,
-                default=default_selection_trad,
-                help="統計的に有意な結果を得るため、5-10名の選択を推奨",
-                key="traditional_members"
-            )
-
-            if len(selected_excellent_trad) >= 3 and st.button("🚀 従来版 Layer 1-3 分析を実行", key="traditional_analysis"):
-                try:
-                    with st.spinner("従来版 Layer 1-3 分析を実行中...（生データから直接分析）"):
-
-                        # Layer 1: 優秀者特性の逆向き分析
-                        logger.info(f"Layer 1を実行中: {len(selected_excellent_trad)}人の優秀群を分析")
-                        skill_profile_trad = st.session_state.analyzer.analyze_skill_profile_of_excellent_members(
-                            selected_excellent_trad
-                        )
-
-                        # Layer 2: 個別メンバーへの因果効果推定（従来版）
-                        logger.info("Layer 2を実行中: 生データを使った個別メンバーの因果効果を推定")
-                        hte_results_trad = st.session_state.analyzer.estimate_heterogeneous_treatment_effects(
-                            selected_excellent_trad,
-                            skill_profile_trad
-                        )
-
-                        # Layer 3: 説明可能性の強化
-                        logger.info("Layer 3を実行中: 包括的な分析洞察を生成")
-                        insights_trad = st.session_state.analyzer.generate_comprehensive_insights(
-                            selected_excellent_trad,
-                            skill_profile_trad,
-                            hte_results_trad
-                        )
-
-                        # セッション状態に保存（従来版）
-                        st.session_state.skill_profile_trad = skill_profile_trad
-                        st.session_state.hte_results_trad = hte_results_trad
-                        st.session_state.insights_trad = insights_trad
-
-                        st.success("✅ 従来版 Layer 1-3 分析が完了しました！")
-
-                except (CausalInferenceError, DataValidationError) as e:
-                    logger.error(f"因果推論エラー: {e}", exc_info=True)
-                    st.error(
-                        f"❌ Layer 1-3 分析の実行中にエラーが発生しました。\n"
-                        f"詳細: {str(e)}\n\n"
-                        f"対策:\n"
-                        f"- 優秀人材の人数を増やしてみてください（推奨: 5-10名）\n"
-                        f"- 対象社員の総数が十分か確認してください（推奨: 50名以上）"
-                    )
-                except Exception as e:
-                    logger.error(f"従来版分析実行エラー: {e}", exc_info=True)
-                    st.error(f"❌ 従来版分析中にエラーが発生しました: {str(e)}")
-
-    # 従来版分析結果の表示
-    if hasattr(st.session_state, 'insights_trad') and st.session_state.insights_trad is not None:
-        insights_trad = st.session_state.insights_trad
-        skill_profile_trad = st.session_state.skill_profile_trad
-        hte_results_trad = st.session_state.hte_results_trad
-
-        st.markdown("---")
-        st.subheader("📊 従来版分析結果")
-
-        # Layer 3の結果を表示
-        st.markdown(insights_trad['executive_summary'])
-
-        # タブで結果を分割表示
-        analysis_tabs_trad = st.tabs([
-            "🎯 優秀者スキルプロファイル",
-            "👥 メンバー別改善提案",
-            "🔗 スキル相乗効果"
-        ])
-
-        # Tab 1: スキルプロファイル（Layer 1）
-        with analysis_tabs_trad[0]:
-            st.subheader("優秀者が持つべきスキル TOP 10")
-
-            top_10_skills_trad = skill_profile_trad[:10]
-
-            for idx, skill in enumerate(top_10_skills_trad, 1):
-                with st.expander(
-                    f"{idx}. {skill['skill_name']} "
-                    f"({skill['importance']*100:+.1f}% 差分)"
-                ):
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        st.metric(
-                            "優秀群での習得率",
-                            f"{skill['p_excellent']*100:.0f}%",
-                            f"信頼区間: {skill['ci_excellent'][0]*100:.0f}%-{skill['ci_excellent'][1]*100:.0f}%"
-                        )
-                        st.metric(
-                            "非優秀群での習得率",
-                            f"{skill['p_control']*100:.0f}%",
-                            f"信頼区間: {skill['ci_control'][0]*100:.0f}%-{skill['ci_control'][1]*100:.0f}%"
-                        )
-
-                    with col2:
-                        st.metric(
-                            "重要度（差分）",
-                            f"{skill['importance']*100:+.1f}%"
-                        )
-                        st.metric(
-                            "統計的有意性",
-                            "有意" if skill['significant'] else "有意でない",
-                            f"p-value: {skill['p_value']:.4f}"
-                        )
-
-                    st.info(skill['interpretation'])
-
-        # Tab 2: メンバー別改善提案（Layer 2）
-        with analysis_tabs_trad[1]:
-            st.subheader("メンバー別改善提案（TOP 20）")
-
-            recommendations_trad = insights_trad['member_recommendations'][:20]
-
-            for rec in recommendations_trad:
-                with st.expander(
-                    f"{rec['member_id']}: "
-                    f"改善期待値 {rec['estimated_improvement']*100:+.1f}%"
-                ):
-                    st.write(rec['summary'])
-
-                    for skill in rec['priority_skills']:
-                        col1, col2 = st.columns([2, 1])
-
-                        with col1:
-                            st.write(f"**{skill['rank']}. {skill['skill_name']}**")
-                            st.caption(skill['reasoning'])
-
-                        with col2:
-                            st.metric(
-                                "信頼度",
-                                skill['confidence'],
-                                f"{skill['expected_effect']*100:+.1f}%"
-                            )
-
-        # Tab 3: スキル相乗効果
-        with analysis_tabs_trad[2]:
-            st.subheader("スキル相乗効果の可能性")
-
-            synergies_trad = insights_trad['skill_combinations']
-
-            if synergies_trad:
-                df_synergies_trad = pd.DataFrame([
-                    {
-                        'スキル組み合わせ': s['skill_combination'],
-                        'そのスキル組を習得者': s['member_count_with_both'],
-                        'ステータス': s['status']
-                    }
-                    for s in synergies_trad
-                ])
-
-                st.dataframe(df_synergies_trad, use_container_width=True)
-            else:
-                st.info("相乗効果が検出されませんでした")
-
+        st.info(
+            "### 🚧 この画面は次のバージョンで実装予定です\n\n"
+            "**実装予定の機能：**\n"
+            "1. 優秀群の選択\n"
+            "2. 従来版逆向き因果推論（GNN不要）\n"
+            "3. 詳細な分析結果の表示"
+        )
 
 # フッター
 st.markdown("---")
