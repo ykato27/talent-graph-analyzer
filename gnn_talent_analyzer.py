@@ -640,6 +640,31 @@ class TalentAnalyzer:
 
     # ==================== Layer 1: 優秀者特性の逆向き分析 ====================
 
+    def get_top_skill_holders(self, top_n=10):
+        """
+        スキル保有数上位のメンバーを取得
+
+        Parameters:
+        -----------
+        top_n: int
+            取得する上位メンバー数（デフォルト: 10）
+
+        Returns:
+        --------
+        top_members: list
+            スキル保有数上位のメンバーコードリスト
+        """
+        # 各メンバーのスキル保有数を計算（スキルレベル > 0 のスキル数）
+        skill_counts = (self.skill_matrix > 0).sum(axis=1)
+
+        # スキル保有数でソートし、上位N名を取得
+        top_indices = np.argsort(skill_counts)[::-1][:top_n]
+        top_members = [self.members[idx] for idx in top_indices]
+
+        logger.info(f"スキル保有数上位{top_n}名を取得: {top_members}")
+
+        return top_members
+
     def analyze_skill_profile_of_excellent_members(self, excellent_members):
         """
         Layer 1: 優秀者特性の逆向き分析
@@ -705,12 +730,13 @@ class TalentAnalyzer:
                 matched_non_excellent_indices
             )
 
-            if result is not None:
+            # 優秀群の習得率が高いスキルのみを採用（マイナスの効果は除外）
+            if result is not None and result['importance'] > 0:
                 skill_profile.append(result)
 
-        # 重要度（差分）でソート
+        # 重要度（差分）でソート（正の値のみなので abs 不要）
         skill_profile.sort(
-            key=lambda x: abs(x['importance']),
+            key=lambda x: x['importance'],
             reverse=True
         )
 
