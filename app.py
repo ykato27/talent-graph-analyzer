@@ -604,19 +604,23 @@ else:  # 従来版因果推論
                     st.warning("有意なスキルが検出されませんでした")
 
             with tab2:
-                st.subheader("メンバー別スキル推奨（上位20名）")
+                st.subheader("メンバー別改善提案（上位20名）")
                 st.info("各メンバーに最も効果的なスキル習得を推奨しています")
 
                 recommendations_trad = insights_trad['member_recommendations'][:20]
 
                 if len(recommendations_trad) > 0:
-                    for i, rec in enumerate(recommendations_trad, 1):
+                    for rec in recommendations_trad:
                         member_name = analyzer.member_names.get(rec['member_id'], '不明')
-                        with st.expander(f"{i}. {member_name} ({rec['member_id']}) - 推奨スキル: {rec['recommended_skill']}"):
-                            st.markdown(f"**推奨スキル:** {rec['recommended_skill']}")
-                            st.markdown(f"**期待効果:** {rec['expected_effect']:.3f}")
-                            st.markdown(f"**信頼度:** {rec['confidence']}")
-                            st.markdown(f"**理由:**\n{rec['reasoning']}")
+                        with st.expander(f"{member_name} ({rec['member_id']}): 改善期待値 {rec['estimated_improvement']*100:+.1f}%"):
+                            st.write(rec['summary'])
+                            for skill in rec['priority_skills']:
+                                col1, col2 = st.columns([2, 1])
+                                with col1:
+                                    st.write(f"**{skill['rank']}. {skill['skill_name']}**")
+                                    st.caption(skill['reasoning'])
+                                with col2:
+                                    st.metric("信頼度", skill['confidence'], f"{skill['expected_effect']*100:+.1f}%")
                 else:
                     st.warning("推奨が生成されませんでした")
 
