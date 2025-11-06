@@ -1,0 +1,6 @@
+# 機械学習モデル用の依存関係
+
+-r base.txt
+
+# Gradient Boosting
+xgboost>=2.0.0,<3.0.0

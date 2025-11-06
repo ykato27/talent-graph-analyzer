@@ -1,0 +1,12 @@
+# 基本的な依存関係（本番環境で必須）
+
+# Data manipulation
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+scipy>=1.11.0,<2.0.0
+
+# Machine Learning
+scikit-learn>=1.3.0,<2.0.0
+
+# Configuration
+pyyaml>=6.0,<7.0
