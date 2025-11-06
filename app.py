@@ -427,19 +427,32 @@ elif selected_feature == "🔬 GNN埋め込み分析（高度）":
                                 st.metric("信頼度", skill['confidence'], f"{skill['expected_effect']*100:+.1f}%")
 
             with analysis_tabs[2]:
-                st.subheader("スキル相乗効果の可能性")
+                st.subheader("スキル相乗効果（因果推論ベース）")
+                st.info("優秀群で共起率が高く、非優秀群との差が大きいスキル組み合わせです")
                 synergies = insights['skill_combinations']
 
                 if synergies:
-                    df_synergies = pd.DataFrame([
-                        {
-                            'スキル組み合わせ': s['skill_combination'],
-                            'そのスキル組を習得者': s['member_count_with_both'],
-                            'ステータス': s['status']
-                        }
-                        for s in synergies
-                    ])
-                    st.dataframe(df_synergies, use_container_width=True)
+                    for idx, s in enumerate(synergies, 1):
+                        with st.expander(
+                            f"{idx}. {s['skill1']} × {s['skill2']} "
+                            f"(相乗効果スコア: {s['synergy_score']:.3f})"
+                        ):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric(
+                                    "優秀群での共起率",
+                                    f"{s['co_occurrence_excellent']*100:.1f}%",
+                                    f"{s['n_excellent_with_both']}名が両方保有"
+                                )
+                            with col2:
+                                st.metric(
+                                    "非優秀群での共起率",
+                                    f"{s['co_occurrence_non_excellent']*100:.1f}%",
+                                    f"{s['n_non_excellent_with_both']}名が両方保有"
+                                )
+
+                            st.markdown(f"**統計的有意性:** {'有意 (p < 0.05)' if s['significant'] else '有意でない'} (p = {s['p_value']:.4f})")
+                            st.info(s['interpretation'])
                 else:
                     st.info("相乗効果が検出されませんでした")
 
@@ -527,24 +540,17 @@ else:  # 従来版因果推論
                         skill_profile_trad
                     )
 
-                    # Layer 3: 総合的な洞察生成
-                    recommendations_trad = analyzer.generate_comprehensive_insights(
+                    # Layer 3: 総合的な洞察生成（相乗効果分析を含む）
+                    insights_trad = analyzer.generate_comprehensive_insights(
                         selected_members_trad,
                         skill_profile_trad,
                         hte_results_trad
                     )
 
-                    # 相乗効果分析
-                    synergies_trad = analyzer.analyze_skill_synergies(
-                        selected_members_trad,
-                        skill_profile_trad
-                    )
-
                     # セッションステートに保存
                     st.session_state.skill_profile_trad = skill_profile_trad
                     st.session_state.hte_results_trad = hte_results_trad
-                    st.session_state.recommendations_trad = recommendations_trad
-                    st.session_state.synergies_trad = synergies_trad
+                    st.session_state.insights_trad = insights_trad
                     st.session_state.selected_members_trad = selected_members_trad
 
                 st.success("✅ 従来版因果推論分析が完了しました！")
@@ -564,8 +570,11 @@ else:  # 従来版因果推論
         st.markdown("---")
 
         # 結果表示
-        if 'skill_profile_trad' in st.session_state:
+        if 'insights_trad' in st.session_state:
             st.header("📈 分析結果")
+
+            insights_trad = st.session_state.insights_trad
+            skill_profile_trad = st.session_state.skill_profile_trad
 
             tab1, tab2, tab3 = st.tabs([
                 "🎯 スキルプロファイル",
@@ -577,7 +586,6 @@ else:  # 従来版因果推論
                 st.subheader("優秀人材の特徴的スキル（上位10件）")
                 st.info("優秀群で有意に高い習得率を示すスキルを重要度順に表示しています")
 
-                skill_profile_trad = st.session_state.skill_profile_trad
                 top_skills = skill_profile_trad[:10]
 
                 if len(top_skills) > 0:
@@ -585,10 +593,10 @@ else:  # 従来版因果推論
                         {
                             'スキル': s['skill_name'],
                             '重要度': f"{s['importance']:.3f}",
-                            '優秀群習得率': f"{s['excellent_rate']*100:.1f}%",
-                            '非優秀群習得率': f"{s['non_excellent_rate']*100:.1f}%",
+                            '優秀群習得率': f"{s['p_excellent']*100:.1f}%",
+                            '非優秀群習得率': f"{s['p_control']*100:.1f}%",
                             'p値': f"{s['p_value']:.4f}",
-                            '統計的有意性': s['significance']
+                            '統計的有意性': '有意' if s['significant'] else '有意でない'
                         }
                         for s in top_skills
                     ])
@@ -600,11 +608,10 @@ else:  # 従来版因果推論
                 st.subheader("メンバー別スキル推奨（上位20名）")
                 st.info("各メンバーに最も効果的なスキル習得を推奨しています")
 
-                recommendations_trad = st.session_state.recommendations_trad
-                top_recommendations = recommendations_trad[:20]
+                recommendations_trad = insights_trad['member_recommendations'][:20]
 
-                if len(top_recommendations) > 0:
-                    for i, rec in enumerate(top_recommendations, 1):
+                if len(recommendations_trad) > 0:
+                    for i, rec in enumerate(recommendations_trad, 1):
                         member_name = analyzer.member_names.get(rec['member_id'], '不明')
                         with st.expander(f"{i}. {member_name} ({rec['member_id']}) - 推奨スキル: {rec['recommended_skill']}"):
                             st.markdown(f"**推奨スキル:** {rec['recommended_skill']}")
@@ -615,23 +622,33 @@ else:  # 従来版因果推論
                     st.warning("推奨が生成されませんでした")
 
             with tab3:
-                st.subheader("スキル相乗効果")
-                st.info("一緒に習得すると相乗効果が期待できるスキルの組み合わせです")
+                st.subheader("スキル相乗効果（因果推論ベース）")
+                st.info("優秀群で共起率が高く、非優秀群との差が大きいスキル組み合わせです")
 
-                synergies_trad = st.session_state.synergies_trad
+                synergies_trad = insights_trad['skill_combinations']
 
                 if len(synergies_trad) > 0:
-                    df_synergies = pd.DataFrame([
-                        {
-                            'スキル1': s['skill1'],
-                            'スキル2': s['skill2'],
-                            '相乗効果スコア': f"{s['synergy_score']:.3f}",
-                            '共起率（優秀群）': f"{s['co_occurrence_excellent']*100:.1f}%",
-                            '共起率（非優秀群）': f"{s['co_occurrence_non_excellent']*100:.1f}%"
-                        }
-                        for s in synergies_trad
-                    ])
-                    st.dataframe(df_synergies, use_container_width=True)
+                    for idx, s in enumerate(synergies_trad, 1):
+                        with st.expander(
+                            f"{idx}. {s['skill1']} × {s['skill2']} "
+                            f"(相乗効果スコア: {s['synergy_score']:.3f})"
+                        ):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric(
+                                    "優秀群での共起率",
+                                    f"{s['co_occurrence_excellent']*100:.1f}%",
+                                    f"{s['n_excellent_with_both']}名が両方保有"
+                                )
+                            with col2:
+                                st.metric(
+                                    "非優秀群での共起率",
+                                    f"{s['co_occurrence_non_excellent']*100:.1f}%",
+                                    f"{s['n_non_excellent_with_both']}名が両方保有"
+                                )
+
+                            st.markdown(f"**統計的有意性:** {'有意 (p < 0.05)' if s['significant'] else '有意でない'} (p = {s['p_value']:.4f})")
+                            st.info(s['interpretation'])
                 else:
                     st.info("相乗効果が検出されませんでした")
 

@@ -1633,7 +1633,9 @@ class TalentAnalyzer:
 
     def _identify_skill_synergies(self, skill_profile, hte_results):
         """
-        スキル相乗効果を特定
+        スキル相乗効果を特定（因果推論ベース）
+
+        優秀群で共起率が高く、非優秀群との差が大きいスキル組み合わせを推薦
 
         Parameters:
         -----------
@@ -1649,6 +1651,27 @@ class TalentAnalyzer:
         """
         synergies = []
 
+        # 優秀群と非優秀群のインデックスを取得
+        excellent_indices = []
+        non_excellent_indices = []
+
+        for member_code, hte_data in hte_results.items():
+            if member_code not in self.member_to_idx:
+                continue
+            member_idx = self.member_to_idx[member_code]
+
+            if hte_data.get('is_excellent', False):
+                excellent_indices.append(member_idx)
+            else:
+                non_excellent_indices.append(member_idx)
+
+        excellent_indices = np.array(excellent_indices)
+        non_excellent_indices = np.array(non_excellent_indices)
+
+        if len(excellent_indices) < 3 or len(non_excellent_indices) < 3:
+            logger.warning("優秀群または非優秀群のサンプル数が不足しています")
+            return []
+
         # TOP 10スキルの組み合わせを分析
         top_10_codes = [s['skill_code'] for s in skill_profile[:10]]
 
@@ -1656,25 +1679,64 @@ class TalentAnalyzer:
             skill_name_a = self.skill_names[skill_code_a]
             skill_name_b = self.skill_names[skill_code_b]
 
-            # スキルAとBの両方を持つメンバー数
+            # スキルインデックス
             skill_a_idx = self.skill_codes.index(skill_code_a)
             skill_b_idx = self.skill_codes.index(skill_code_b)
 
-            has_a = (self.skill_matrix[:, skill_a_idx] > 0).astype(int)
-            has_b = (self.skill_matrix[:, skill_b_idx] > 0).astype(int)
-            has_both = (has_a & has_b).sum()
+            # 優秀群での共起率
+            has_a_excellent = (self.skill_matrix[excellent_indices, skill_a_idx] > 0).astype(int)
+            has_b_excellent = (self.skill_matrix[excellent_indices, skill_b_idx] > 0).astype(int)
+            has_both_excellent = (has_a_excellent & has_b_excellent).sum()
+            co_occurrence_excellent = has_both_excellent / len(excellent_indices)
 
-            if has_both < 3:  # 両方を持つメンバーが少なすぎる
+            # 非優秀群での共起率
+            has_a_non_excellent = (self.skill_matrix[non_excellent_indices, skill_a_idx] > 0).astype(int)
+            has_b_non_excellent = (self.skill_matrix[non_excellent_indices, skill_b_idx] > 0).astype(int)
+            has_both_non_excellent = (has_a_non_excellent & has_b_non_excellent).sum()
+            co_occurrence_non_excellent = has_both_non_excellent / len(non_excellent_indices)
+
+            # 相乗効果スコア：優秀群での共起率と、優秀群と非優秀群の差
+            synergy_score = co_occurrence_excellent * (co_occurrence_excellent - co_occurrence_non_excellent)
+
+            # フィルタリング：優秀群で少なくとも2人以上が両方持っている
+            if has_both_excellent < 2:
                 continue
 
+            # 相乗効果スコアが正（優秀群の方が共起率が高い）の場合のみ
+            if synergy_score <= 0:
+                continue
+
+            # Fisher検定で統計的有意性を確認
+            try:
+                contingency_table = np.array([
+                    [has_both_excellent, len(excellent_indices) - has_both_excellent],
+                    [has_both_non_excellent, len(non_excellent_indices) - has_both_non_excellent]
+                ])
+                _, p_value = fisher_exact(contingency_table)
+            except (ValueError, ZeroDivisionError):
+                p_value = 1.0
+
             synergy = {
-                'skill_combination': f"{skill_name_a} + {skill_name_b}",
-                'member_count_with_both': int(has_both),
-                'status': 'メンバー数が多い' if has_both >= 5 else 'レアな組み合わせ',
-                'recommendation': '相乗効果の可能性があります'
+                'skill1': skill_name_a,
+                'skill2': skill_name_b,
+                'synergy_score': float(synergy_score),
+                'co_occurrence_excellent': float(co_occurrence_excellent),
+                'co_occurrence_non_excellent': float(co_occurrence_non_excellent),
+                'n_excellent_with_both': int(has_both_excellent),
+                'n_non_excellent_with_both': int(has_both_non_excellent),
+                'p_value': float(p_value),
+                'significant': p_value < 0.05,
+                'interpretation': (
+                    f"優秀群の{co_occurrence_excellent*100:.1f}%が両方のスキルを保有（"
+                    f"非優秀群は{co_occurrence_non_excellent*100:.1f}%）。"
+                    f"{'統計的に有意な' if p_value < 0.05 else ''}相乗効果が期待できます。"
+                )
             }
 
             synergies.append(synergy)
+
+        # 相乗効果スコアでソート
+        synergies.sort(key=lambda x: x['synergy_score'], reverse=True)
 
         return synergies[:10]  # TOP 10の組み合わせ
 
