@@ -1024,10 +1024,247 @@ else:
     - 学習エポック: {DEFAULT_EPOCHS}-{MAX_EPOCHS//2}
     """)
 
+    # Layer 1-3 逆向き因果推論分析の結果表示
+    st.markdown("---")
+    st.header("🔄 逆向き因果推論分析（新機能）")
+
+    if st.session_state.data_loaded and st.session_state.analyzer is not None:
+        with st.expander("📚 Layer 1-3 分析を実行", expanded=True):
+
+            # 優秀群の選択
+            selected_excellent = st.multiselect(
+                "優秀群として分析する社員を選択（最低3名）",
+                st.session_state.member_df['メンバーコード'].unique(),
+                help="統計的に有意な結果を得るため、5-10名の選択を推奨"
+            )
+
+            if len(selected_excellent) >= 3 and st.button("🚀 Layer 1-3 分析を実行"):
+                try:
+                    with st.spinner("Layer 1-3 分析を実行中...（数秒かかります）"):
+
+                        # Layer 1: 優秀者特性の逆向き分析
+                        logger.info(f"Layer 1を実行中: {len(selected_excellent)}人の優秀群を分析")
+                        skill_profile = st.session_state.analyzer.analyze_skill_profile_of_excellent_members(
+                            selected_excellent
+                        )
+
+                        # Layer 2: 個別メンバーへの因果効果推定
+                        logger.info("Layer 2を実行中: 個別メンバーの因果効果を推定")
+                        hte_results = st.session_state.analyzer.estimate_heterogeneous_treatment_effects(
+                            selected_excellent,
+                            skill_profile
+                        )
+
+                        # Layer 3: 説明可能性の強化
+                        logger.info("Layer 3を実行中: 包括的な分析洞察を生成")
+                        insights = st.session_state.analyzer.generate_comprehensive_insights(
+                            selected_excellent,
+                            skill_profile,
+                            hte_results
+                        )
+
+                        # セッション状態に保存
+                        st.session_state.skill_profile = skill_profile
+                        st.session_state.hte_results = hte_results
+                        st.session_state.insights = insights
+
+                        st.success("✅ Layer 1-3 分析が完了しました！")
+
+                except Exception as e:
+                    logger.error(f"分析実行エラー: {e}", exc_info=True)
+                    st.error(f"❌ 分析中にエラーが発生しました: {str(e)}")
+
+    # 分析結果の表示
+    if hasattr(st.session_state, 'insights') and st.session_state.insights is not None:
+        insights = st.session_state.insights
+        skill_profile = st.session_state.skill_profile
+        hte_results = st.session_state.hte_results
+
+        st.markdown("---")
+
+        # Layer 3の結果を表示
+        st.markdown(insights['executive_summary'])
+
+        # タブで結果を分割表示
+        analysis_tabs = st.tabs([
+            "🎯 優秀者スキルプロファイル",
+            "👥 メンバー別改善提案",
+            "📊 組織スキルギャップ",
+            "🔗 スキル相乗効果",
+            "🗺️ 開発ロードマップ"
+        ])
+
+        # Tab 1: スキルプロファイル（Layer 1）
+        with analysis_tabs[0]:
+            st.subheader("優秀者が持つべきスキル TOP 10")
+
+            top_10_skills = skill_profile[:10]
+
+            for idx, skill in enumerate(top_10_skills, 1):
+                with st.expander(
+                    f"{idx}. {skill['skill_name']} "
+                    f"({skill['importance']*100:+.1f}% 差分)"
+                ):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        st.metric(
+                            "優秀群での習得率",
+                            f"{skill['p_excellent']*100:.0f}%",
+                            f"信頼区間: {skill['ci_excellent'][0]*100:.0f}%-{skill['ci_excellent'][1]*100:.0f}%"
+                        )
+                        st.metric(
+                            "非優秀群での習得率",
+                            f"{skill['p_control']*100:.0f}%",
+                            f"信頼区間: {skill['ci_control'][0]*100:.0f}%-{skill['ci_control'][1]*100:.0f}%"
+                        )
+
+                    with col2:
+                        st.metric(
+                            "重要度（差分）",
+                            f"{skill['importance']*100:+.1f}%"
+                        )
+                        st.metric(
+                            "統計的有意性",
+                            "有意" if skill['significant'] else "有意でない",
+                            f"p-value: {skill['p_value']:.4f}"
+                        )
+
+                    st.info(skill['interpretation'])
+
+        # Tab 2: メンバー別改善提案（Layer 2）
+        with analysis_tabs[1]:
+            st.subheader("メンバー別改善提案（TOP 20）")
+
+            recommendations = insights['member_recommendations'][:20]
+
+            for rec in recommendations:
+                with st.expander(
+                    f"{rec['member_id']}: "
+                    f"改善期待値 {rec['estimated_improvement']*100:+.1f}%"
+                ):
+                    st.write(rec['summary'])
+
+                    for skill in rec['priority_skills']:
+                        col1, col2 = st.columns([2, 1])
+
+                        with col1:
+                            st.write(f"**{skill['rank']}. {skill['skill_name']}**")
+                            st.caption(skill['reasoning'])
+
+                        with col2:
+                            st.metric(
+                                "信頼度",
+                                skill['confidence'],
+                                f"{skill['expected_effect']*100:+.1f}%"
+                            )
+
+        # Tab 3: 組織スキルギャップ
+        with analysis_tabs[2]:
+            st.subheader("組織スキルギャップ分析")
+
+            gaps = insights['organizational_gaps']
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.write("### 🔴 Critical Gap")
+                st.write(f"**{len(gaps['critical_gaps'])}個のスキル**")
+                for skill in gaps['critical_gaps'][:3]:
+                    st.write(f"- {skill['skill_name']}: {skill['gap']*100:+.1f}%")
+
+            with col2:
+                st.write("### 🟡 High Potential")
+                st.write(f"**{len(gaps['high_potential_skills'])}個のスキル**")
+                for skill in gaps['high_potential_skills'][:3]:
+                    st.write(f"- {skill['skill_name']}: {skill['importance']*100:+.1f}%")
+
+            with col3:
+                st.write("### 🟢 Saturation")
+                st.write(f"**{len(gaps['saturation_skills'])}個のスキル**")
+                for skill in gaps['saturation_skills'][:3]:
+                    st.write(f"- {skill['skill_name']}: {skill['adoption_rate']*100:.0f}%")
+
+        # Tab 4: スキル相乗効果
+        with analysis_tabs[3]:
+            st.subheader("スキル相乗効果の可能性")
+
+            synergies = insights['skill_combinations']
+
+            if synergies:
+                df_synergies = pd.DataFrame([
+                    {
+                        'スキル組み合わせ': s['skill_combination'],
+                        'そのスキル組を習得者': s['member_count_with_both'],
+                        'ステータス': s['status']
+                    }
+                    for s in synergies
+                ])
+
+                st.dataframe(df_synergies, use_container_width=True)
+            else:
+                st.info("相乗効果が検出されませんでした")
+
+        # Tab 5: 開発ロードマップ
+        with analysis_tabs[4]:
+            st.subheader("スキル開発ロードマップ")
+
+            roadmap = insights['development_roadmap']
+            resources = roadmap['resources_required']
+
+            # リソース見積もり
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric(
+                    "開発対象メンバー数",
+                    resources['estimated_members_to_develop']
+                )
+
+            with col2:
+                st.metric(
+                    "推奨実施期間",
+                    f"{resources['recommended_timeline_months']}ヶ月"
+                )
+
+            with col3:
+                st.metric(
+                    "推定総コスト",
+                    f"¥{resources['total_estimated_cost']:,.0f}"
+                )
+
+            # 優先度付けスキルプラン
+            st.markdown("### 優先度付けスキル習得計画")
+
+            for phase, phase_name in [
+                ('immediate_priority', '🔴 即座実施（1ヶ月以内）'),
+                ('short_term', '🟡 短期計画（3ヶ月以内）'),
+                ('medium_term', '🟢 中期計画（6ヶ月以内）')
+            ]:
+                with st.expander(phase_name, expanded=(phase == 'immediate_priority')):
+
+                    plans = roadmap[phase][:10]
+
+                    if plans:
+                        df_plans = pd.DataFrame([
+                            {
+                                'メンバーID': p['member_id'],
+                                'スキル': p['skill'],
+                                '期待効果': f"{p['expected_effect']*100:+.1f}%",
+                                '信頼度': p['confidence']
+                            }
+                            for p in plans
+                        ])
+
+                        st.dataframe(df_plans, use_container_width=True)
+                    else:
+                        st.info(f"{phase_name} に該当するスキルはありません")
+
+
 # フッター
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; color: gray;'>
-GNN優秀人材分析システム v1.0 | Powered by Graph Neural Networks
+GNN優秀人材分析システム v2.0 | 逆向き因果推論 + HTE分析対応 | Powered by Graph Neural Networks
 </div>
 """, unsafe_allow_html=True)

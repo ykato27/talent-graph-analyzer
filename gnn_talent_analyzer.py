@@ -9,7 +9,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, roc_curve
 from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import LogisticRegression
-from scipy.stats import fisher_exact, ttest_ind
+from scipy.stats import fisher_exact, ttest_ind, norm
 from statsmodels.stats.multitest import multipletests
 from itertools import combinations
 import warnings
@@ -1691,6 +1691,944 @@ class TalentAnalyzer:
         group_indices = np.where(mask)[0]
         excellent_in_group = len(set(group_indices) & set(excellent_indices))
         return excellent_in_group / len(group_indices)
+
+    # ==================== Layer 1: 優秀者特性の逆向き分析 ====================
+
+    def analyze_skill_profile_of_excellent_members(self, excellent_members):
+        """
+        Layer 1: 優秀者特性の逆向き分析
+
+        優秀群（n=10）と傾向スコアマッチング後の非優秀群を比較し、
+        「優秀者が持つべきスキルプロファイル」を分析
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+
+        Returns:
+        --------
+        skill_profile: list[dict]
+            スキルプロファイルのリスト（重要度順）
+            各要素には以下を含む：
+            - skill_code: スキルコード
+            - skill_name: スキル名
+            - importance: 重要度（0-1）
+            - p_excellent: 優秀群での習得率
+            - p_non_excellent: 非優秀群での習得率
+            - ci_excellent: 優秀群の習得率CI
+            - ci_non_excellent: 非優秀群の習得率CI
+            - p_value: Fisher検定のp値
+            - significant: 統計的有意性フラグ
+            - interpretation: 解釈文
+        """
+        logger.info("=== Layer 1: 優秀者特性の逆向き分析を開始 ===")
+
+        excellent_indices = np.array([
+            self.member_to_idx[m] for m in excellent_members
+            if m in self.member_to_idx
+        ])
+
+        if len(excellent_indices) == 0:
+            logger.warning("優秀群のインデックスが空です")
+            return []
+
+        # 非優秀群のインデックス
+        all_indices = np.arange(len(self.members))
+        non_excellent_indices = np.array([
+            idx for idx in all_indices if idx not in excellent_indices
+        ])
+
+        logger.info(f"優秀群: {len(excellent_indices)}名, 非優秀群: {len(non_excellent_indices)}名")
+
+        # 傾向スコアマッチングで対照群を作成
+        matched_non_excellent_indices = self._create_matched_control_group(
+            excellent_indices,
+            non_excellent_indices
+        )
+
+        logger.info(f"マッチング後の対照群: {len(matched_non_excellent_indices)}名")
+
+        # 各スキルについて、優秀群と非優秀群のプロファイルを比較
+        skill_profile = []
+
+        for skill_idx in range(len(self.skill_codes)):
+            result = self._compare_skill_acquisition(
+                skill_idx,
+                excellent_indices,
+                matched_non_excellent_indices
+            )
+
+            if result is not None:
+                skill_profile.append(result)
+
+        # 重要度（差分）でソート
+        skill_profile.sort(
+            key=lambda x: abs(x['importance']),
+            reverse=True
+        )
+
+        logger.info(f"スキルプロファイル分析完了: {len(skill_profile)}個のスキル")
+
+        return skill_profile
+
+    def _create_matched_control_group(self, excellent_indices, non_excellent_indices):
+        """
+        傾向スコアマッチングで対照群を作成
+
+        優秀群との共変量バランスを取るため、
+        傾向スコアが最も近い非優秀者を対応させる
+
+        Parameters:
+        -----------
+        excellent_indices: array
+            優秀群のインデックス
+        non_excellent_indices: array
+            非優秀群のインデックス
+
+        Returns:
+        --------
+        matched_indices: array
+            マッチングされた非優秀群のインデックス
+        """
+        try:
+            # 優秀フラグを作成
+            is_excellent = np.zeros(len(self.members))
+            is_excellent[excellent_indices] = 1
+
+            # 傾向スコアモデルをフィット
+            ps_model = LogisticRegression(
+                max_iter=1000,
+                random_state=DEFAULT_RANDOM_STATE
+            )
+            ps_model.fit(self.member_features, is_excellent)
+            propensity_scores = ps_model.predict_proba(self.member_features)[:, 1]
+
+            # 各優秀者について、最も傾向スコアが近い非優秀者を見つける
+            matched_indices = []
+            caliper = DEFAULT_CALIPER
+
+            for exc_idx in excellent_indices:
+                exc_ps = propensity_scores[exc_idx]
+
+                # マッチング候補の傾向スコア差
+                ps_diff = np.abs(propensity_scores[non_excellent_indices] - exc_ps)
+
+                if len(ps_diff) == 0:
+                    continue
+
+                # 最小の差を持つ非優秀者を選択
+                best_idx = non_excellent_indices[ps_diff.argmin()]
+
+                if ps_diff.min() < caliper:
+                    matched_indices.append(best_idx)
+
+            logger.debug(f"傾向スコアマッチング: {len(matched_indices)}/{len(excellent_indices)} ペアが成功")
+
+            return np.array(matched_indices)
+
+        except Exception as e:
+            logger.warning(f"傾向スコアマッチング失敗、全非優秀群を使用: {e}")
+            return non_excellent_indices
+
+    def _compare_skill_acquisition(self, skill_idx, excellent_indices, control_indices):
+        """
+        特定のスキルについて、優秀群と対照群のプロファイルを比較
+
+        Parameters:
+        -----------
+        skill_idx: int
+            スキルのインデックス
+        excellent_indices: array
+            優秀群のインデックス
+        control_indices: array
+            対照群（マッチング済み非優秀群）のインデックス
+
+        Returns:
+        --------
+        result: dict
+            スキル比較結果
+        """
+        skill_code = self.skill_codes[skill_idx]
+        skill_name = self.skill_names[skill_code]
+
+        # 習得フラグ（スキルレベル > 0 を習得と見なす）
+        has_skill_excellent = (self.skill_matrix[excellent_indices, skill_idx] > 0).astype(int)
+        has_skill_control = (self.skill_matrix[control_indices, skill_idx] > 0).astype(int)
+
+        # 習得率を計算
+        n_excellent = len(excellent_indices)
+        n_control = len(control_indices)
+
+        n_skill_excellent = has_skill_excellent.sum()
+        n_skill_control = has_skill_control.sum()
+
+        p_excellent = n_skill_excellent / n_excellent if n_excellent > 0 else 0
+        p_control = n_skill_control / n_control if n_control > 0 else 0
+
+        # 重要度（差分）
+        importance = p_excellent - p_control
+
+        # Wilson信頼区間を計算
+        z = norm.ppf(0.975)  # 95% CI
+        ci_excellent = self._wilson_confidence_interval(
+            n_skill_excellent, n_excellent, z
+        )
+        ci_control = self._wilson_confidence_interval(
+            n_skill_control, n_control, z
+        )
+
+        # Fisher正確検定
+        try:
+            # 分割表を作成
+            contingency_table = np.array([
+                [n_skill_excellent, n_excellent - n_skill_excellent],
+                [n_skill_control, n_control - n_skill_control]
+            ])
+
+            odds_ratio, p_value = fisher_exact(contingency_table)
+        except (ValueError, ZeroDivisionError):
+            logger.debug(f"スキル {skill_name} のFisher検定失敗")
+            p_value = 1.0
+            odds_ratio = 1.0
+
+        # 統計的有意性
+        alpha = DEFAULT_SIGNIFICANCE_LEVEL
+        significant = p_value < alpha
+
+        # 解釈文を生成
+        interpretation = self._generate_skill_interpretation(
+            skill_name,
+            p_excellent,
+            p_control,
+            importance,
+            p_value,
+            significant
+        )
+
+        return {
+            'skill_code': skill_code,
+            'skill_name': skill_name,
+            'importance': importance,
+            'p_excellent': p_excellent,
+            'p_control': p_control,
+            'ci_excellent': ci_excellent,
+            'ci_control': ci_control,
+            'p_value': p_value,
+            'significant': significant,
+            'n_excellent': n_excellent,
+            'n_skill_excellent': n_skill_excellent,
+            'n_control': n_control,
+            'n_skill_control': n_skill_control,
+            'interpretation': interpretation
+        }
+
+    def _wilson_confidence_interval(self, successes, n, z=1.96):
+        """
+        Wilson スコア法による信頼区間を計算
+
+        Parameters:
+        -----------
+        successes: int
+            成功数
+        n: int
+            試行数
+        z: float
+            標準正規分布の分位点（デフォルト: 1.96 = 95%CI）
+
+        Returns:
+        --------
+        ci: tuple
+            (下限, 上限)
+        """
+        if n == 0:
+            return (0, 0)
+
+        p_hat = successes / n
+        denominator = 1 + z**2 / n
+        center = (p_hat + z**2 / (2*n)) / denominator
+        margin = z * np.sqrt(p_hat*(1-p_hat)/n + z**2/(4*n**2)) / denominator
+
+        lower = max(0, center - margin)
+        upper = min(1, center + margin)
+
+        return (lower, upper)
+
+    def _generate_skill_interpretation(self, skill_name, p_excellent, p_control,
+                                       importance, p_value, significant):
+        """
+        スキル比較結果の解釈文を生成
+
+        Parameters:
+        -----------
+        skill_name: str
+            スキル名
+        p_excellent: float
+            優秀群での習得率
+        p_control: float
+            対照群での習得率
+        importance: float
+            重要度（差分）
+        p_value: float
+            Fisher検定のp値
+        significant: bool
+            統計的有意性フラグ
+
+        Returns:
+        --------
+        interpretation: str
+            解釈文
+        """
+        significance_text = "（統計的に有意）" if significant else ""
+
+        if importance > 0:
+            return (
+                f"優秀群の {p_excellent*100:.0f}% が習得 vs "
+                f"非優秀群の {p_control*100:.0f}% "
+                f"（差分: +{importance*100:.1f}%）"
+                f"{significance_text}"
+            )
+        else:
+            return (
+                f"優秀群の {p_excellent*100:.0f}% が習得 vs "
+                f"非優秀群の {p_control*100:.0f}% "
+                f"（差分: {importance*100:.1f}%）"
+                f"{significance_text}"
+            )
+
+    # ==================== Layer 2: 個別メンバーへの因果効果推定（HTE） ====================
+
+    def estimate_heterogeneous_treatment_effects(self, excellent_members, skill_profile):
+        """
+        Layer 2: 個別メンバーへの因果効果推定（HTE）
+
+        各メンバーについて、各スキル習得の個別効果を推定
+        「このメンバーがスキルXを習得したら...」を個別推定
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        skill_profile: list[dict]
+            Layer 1から得られたスキルプロファイル
+
+        Returns:
+        --------
+        hte_results: dict
+            メンバー別のHTE推定結果
+            {
+                'member_id': {
+                    'skills': [
+                        {
+                            'skill_code': str,
+                            'skill_name': str,
+                            'estimated_effect': float,
+                            'confidence': float,
+                            'reasoning': str
+                        },
+                        ...
+                    ],
+                    'top_5_skills': [...],  # TOP 5推奨スキル
+                }
+            }
+        """
+        logger.info("=== Layer 2: 個別メンバーへの因果効果推定を開始 ===")
+
+        excellent_indices = np.array([
+            self.member_to_idx[m] for m in excellent_members
+            if m in self.member_to_idx
+        ])
+
+        # 各メンバーの優秀フラグ
+        is_excellent = np.zeros(len(self.members))
+        is_excellent[excellent_indices] = 1
+
+        # 各スキルについて HTE を推定
+        hte_matrix = np.zeros((len(self.members), len(self.skill_codes)))
+
+        for skill_idx in range(len(self.skill_codes)):
+            hte_matrix[:, skill_idx] = self._estimate_skill_specific_hte(
+                skill_idx,
+                is_excellent,
+                excellent_indices
+            )
+
+        # 結果をメンバー別にまとめる
+        hte_results = {}
+
+        for member_idx, member_code in enumerate(self.members):
+            skill_effects = []
+
+            for skill_idx in range(len(self.skill_codes)):
+                skill_code = self.skill_codes[skill_idx]
+                skill_name = self.skill_names[skill_code]
+
+                estimated_effect = hte_matrix[member_idx, skill_idx]
+
+                # 対応するスキルプロファイルを取得
+                profile_entry = next(
+                    (s for s in skill_profile if s['skill_code'] == skill_code),
+                    None
+                )
+
+                # 信頼度とレベル分けを生成
+                confidence = self._calculate_confidence_level(
+                    profile_entry,
+                    estimated_effect
+                )
+
+                reasoning = self._generate_member_specific_reasoning(
+                    member_idx,
+                    skill_name,
+                    estimated_effect,
+                    profile_entry,
+                    confidence
+                )
+
+                skill_effects.append({
+                    'skill_code': skill_code,
+                    'skill_name': skill_name,
+                    'estimated_effect': float(estimated_effect),
+                    'confidence': confidence,
+                    'reasoning': reasoning,
+                    'profile_rank': next(
+                        (i for i, s in enumerate(skill_profile) if s['skill_code'] == skill_code),
+                        len(skill_profile) + 1
+                    )
+                })
+
+            # 効果の大きさでソート
+            skill_effects.sort(key=lambda x: abs(x['estimated_effect']), reverse=True)
+
+            hte_results[member_code] = {
+                'member_id': member_code,
+                'is_excellent': bool(is_excellent[member_idx]),
+                'skills': skill_effects,
+                'top_5_skills': skill_effects[:5],
+                'summary': self._generate_member_summary(
+                    member_code,
+                    skill_effects[:3],
+                    is_excellent[member_idx]
+                )
+            }
+
+        logger.info(f"HTE推定完了: {len(hte_results)}メンバー")
+
+        return hte_results
+
+    def _estimate_skill_specific_hte(self, skill_idx, is_excellent, excellent_indices):
+        """
+        特定のスキルについて HTE を推定
+
+        Doubly Robust推定量を使用して、バイアスを低減する
+
+        Parameters:
+        -----------
+        skill_idx: int
+            スキルのインデックス
+        is_excellent: array
+            優秀フラグ
+        excellent_indices: array
+            優秀群のインデックス
+
+        Returns:
+        --------
+        hte: array
+            各メンバーについての推定効果
+        """
+        has_skill = (self.skill_matrix[:, skill_idx] > 0).astype(int)
+
+        try:
+            # 傾向スコアモデル（スキル習得の傾向）
+            ps_model = LogisticRegression(
+                max_iter=1000,
+                random_state=DEFAULT_RANDOM_STATE
+            )
+            ps_model.fit(self.member_features, has_skill)
+            propensity_scores = ps_model.predict_proba(self.member_features)[:, 1]
+
+            # スキル習得者と未習得者を分離
+            skill_acquirers = np.where(has_skill == 1)[0]
+            non_acquirers = np.where(has_skill == 0)[0]
+
+            # Doubly Robust推定量
+            hte = np.zeros(len(self.members))
+
+            for i in range(len(self.members)):
+                ps_i = propensity_scores[i]
+
+                # Propensity scoreが極端な値を避ける
+                if ps_i < 0.01 or ps_i > 0.99:
+                    hte[i] = 0
+                    continue
+
+                # スキル習得者の場合
+                if has_skill[i] == 1:
+                    hte[i] = is_excellent[i] / ps_i
+                # スキル未習得者の場合
+                else:
+                    hte[i] = -is_excellent[i] / (1 - ps_i)
+
+            return hte
+
+        except Exception as e:
+            logger.warning(f"スキル {self.skill_names.get(self.skill_codes[skill_idx], 'Unknown')} の HTE推定失敗: {e}")
+            return np.zeros(len(self.members))
+
+    def _calculate_confidence_level(self, profile_entry, estimated_effect):
+        """
+        推定効果の信頼度をレベル分け
+
+        Parameters:
+        -----------
+        profile_entry: dict
+            スキルプロファイルエントリ
+        estimated_effect: float
+            推定効果
+
+        Returns:
+        --------
+        confidence: str
+            "Low", "Medium", "High" のいずれか
+        """
+        if profile_entry is None:
+            return "Low"
+
+        p_value = profile_entry.get('p_value', 1.0)
+        n_excellent = profile_entry.get('n_excellent', 0)
+
+        # 統計的有意性と サンプルサイズから信頼度を判定
+        if p_value < 0.01 and n_excellent >= 10:
+            return "High"
+        elif p_value < 0.05 and n_excellent >= 5:
+            return "Medium"
+        else:
+            return "Low"
+
+    def _generate_member_specific_reasoning(self, member_idx, skill_name, estimated_effect,
+                                           profile_entry, confidence):
+        """
+        メンバー固有の根拠付き説明を生成
+
+        Parameters:
+        -----------
+        member_idx: int
+            メンバーのインデックス
+        skill_name: str
+            スキル名
+        estimated_effect: float
+            推定効果
+        profile_entry: dict
+            スキルプロファイルエントリ
+        confidence: str
+            信頼度
+
+        Returns:
+        --------
+        reasoning: str
+            説明文
+        """
+        if profile_entry is None:
+            return f"統計データが不足しているため、{skill_name} の効果を推定できません"
+
+        p_excellent = profile_entry.get('p_excellent', 0)
+        p_control = profile_entry.get('p_control', 0)
+        significant = profile_entry.get('significant', False)
+
+        sig_text = "（統計的に有意）" if significant else ""
+
+        effect_text = f"+{estimated_effect*100:.1f}%" if estimated_effect > 0 else f"{estimated_effect*100:.1f}%"
+
+        reasoning = (
+            f"{skill_name}習得で優秀度が {effect_text} 変化見込み\n"
+            f"根拠：優秀者の {p_excellent*100:.0f}% が習得（非優秀群 {p_control*100:.0f}%）{sig_text}\n"
+            f"信頼度：{confidence}"
+        )
+
+        return reasoning
+
+    def _generate_member_summary(self, member_code, top_skills, is_excellent):
+        """
+        メンバーの改善提案サマリーを生成
+
+        Parameters:
+        -----------
+        member_code: str
+            メンバーコード
+        top_skills: list[dict]
+            TOP 3のスキル
+        is_excellent: bool
+            優秀者フラグ
+
+        Returns:
+        --------
+        summary: str
+            サマリーテキスト
+        """
+        if is_excellent:
+            return f"{member_code}: 既に優秀人材です。さらなるスキル習得で組織への貢献度を向上できます。"
+
+        if not top_skills:
+            return f"{member_code}: 改善の余地があります。スキルプロファイルを確認してください。"
+
+        top_skill_names = [s['skill_name'] for s in top_skills[:3]]
+        skills_text = "、".join(top_skill_names)
+
+        return f"{member_code}: 優先習得すべきスキルは {skills_text} です。"
+
+    # ==================== Layer 3: 説明可能性の強化 ====================
+
+    def generate_comprehensive_insights(self, excellent_members, skill_profile, hte_results):
+        """
+        Layer 3: 説明可能性の強化
+
+        人材育成担当者向けの根拠付きスキル開発提案を生成
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        skill_profile: list[dict]
+            Layer 1から得られたスキルプロファイル
+        hte_results: dict
+            Layer 2から得られたHTE推定結果
+
+        Returns:
+        --------
+        insights: dict
+            包括的な分析洞察
+            {
+                'executive_summary': str,
+                'top_10_skills': list,
+                'organizational_gaps': dict,
+                'member_recommendations': list,
+                'skill_combinations': list,
+                'development_roadmap': dict
+            }
+        """
+        logger.info("=== Layer 3: 説明可能性の強化を開始 ===")
+
+        insights = {
+            'executive_summary': self._generate_executive_summary(
+                excellent_members,
+                skill_profile
+            ),
+            'top_10_skills': skill_profile[:10],
+            'organizational_gaps': self._analyze_organizational_gaps(
+                skill_profile,
+                hte_results
+            ),
+            'member_recommendations': self._generate_priority_recommendations(
+                excellent_members,
+                hte_results
+            ),
+            'skill_combinations': self._identify_skill_synergies(
+                skill_profile,
+                hte_results
+            ),
+            'development_roadmap': self._create_development_roadmap(
+                excellent_members,
+                hte_results
+            )
+        }
+
+        logger.info("説明可能性の強化が完了しました")
+
+        return insights
+
+    def _generate_executive_summary(self, excellent_members, skill_profile):
+        """
+        エグゼクティブサマリーを生成
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コード
+        skill_profile: list[dict]
+            スキルプロファイル
+
+        Returns:
+        --------
+        summary: str
+            サマリーテキスト
+        """
+        n_excellent = len(excellent_members)
+        n_skills_total = len(skill_profile)
+        n_significant = sum(1 for s in skill_profile if s['significant'])
+
+        top_skill = skill_profile[0] if skill_profile else None
+
+        summary = (
+            f"## 分析サマリー\n\n"
+            f"優秀人材 {n_excellent}名を対象とした逆向き因果推論分析を実施しました。\n\n"
+            f"**主要な発見：**\n\n"
+            f"1. **優秀者の特性スキル**: {n_skills_total}個のスキル中、"
+            f"{n_significant}個が統計的に有意な差異を示しています\n\n"
+        )
+
+        if top_skill:
+            summary += (
+                f"2. **最優先スキル**: {top_skill['skill_name']}\n"
+                f"   - 優秀群での習得率: {top_skill['p_excellent']*100:.0f}%\n"
+                f"   - 非優秀群での習得率: {top_skill['p_control']*100:.0f}%\n"
+                f"   - 差分: +{top_skill['importance']*100:.1f}%\n"
+                f"   - 有意性: {'有意 (p < 0.05)' if top_skill['significant'] else '有意でない'}\n\n"
+            )
+
+        summary += (
+            f"3. **推奨アクション**:\n"
+            f"   - 上位スキルを優先的に育成プログラムに組み込む\n"
+            f"   - メンバー別の個別化されたスキル開発計画を策定\n"
+            f"   - スキル相互作用を活用した効率的な育成\n"
+        )
+
+        return summary
+
+    def _analyze_organizational_gaps(self, skill_profile, hte_results):
+        """
+        組織全体のスキルギャップを分析
+
+        Parameters:
+        -----------
+        skill_profile: list[dict]
+            スキルプロファイル
+        hte_results: dict
+            HTE推定結果
+
+        Returns:
+        --------
+        gaps: dict
+            スキルギャップ分析結果
+        """
+        gaps = {
+            'critical_gaps': [],  # 習得率が低く重要なスキル
+            'high_potential_skills': [],  # 習得率は低いが効果が大きいスキル
+            'saturation_skills': [],  # 既に多くが習得しているスキル
+        }
+
+        for skill in skill_profile[:20]:  # TOP 20をチェック
+            p_excellent = skill['p_excellent']
+            p_control = skill['p_control']
+            importance = skill['importance']
+
+            # Critical gap: 優秀群での習得率が高いが、全体では低い
+            if p_excellent > 0.7 and p_control < 0.3 and importance > 0.3:
+                gaps['critical_gaps'].append({
+                    'skill_name': skill['skill_name'],
+                    'excellent_rate': p_excellent,
+                    'overall_rate': p_control,
+                    'gap': importance,
+                    'status': '優秀者特有スキル'
+                })
+
+            # High potential: 習得効果が大きいスキル
+            if importance > 0.25 and p_control < 0.5:
+                gaps['high_potential_skills'].append({
+                    'skill_name': skill['skill_name'],
+                    'importance': importance,
+                    'current_adoption': p_control,
+                    'status': '組織全体での習得を推奨'
+                })
+
+            # Saturation: 既に広く習得されているスキル
+            if p_control > 0.7 and p_excellent > 0.8:
+                gaps['saturation_skills'].append({
+                    'skill_name': skill['skill_name'],
+                    'adoption_rate': p_control,
+                    'status': '基本スキル'
+                })
+
+        return gaps
+
+    def _generate_priority_recommendations(self, excellent_members, hte_results):
+        """
+        優先度付けメンバー改善提案を生成
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コード
+        hte_results: dict
+            HTE推定結果
+
+        Returns:
+        --------
+        recommendations: list[dict]
+            メンバー別の優先度付け提案
+        """
+        recommendations = []
+
+        for member_code, hte_data in hte_results.items():
+            if hte_data['is_excellent']:
+                continue  # 優秀者はスキップ
+
+            top_3_skills = hte_data['top_5_skills'][:3]
+
+            if not top_3_skills:
+                continue
+
+            recommendation = {
+                'member_id': member_code,
+                'priority_skills': [
+                    {
+                        'rank': i + 1,
+                        'skill_name': skill['skill_name'],
+                        'expected_effect': skill['estimated_effect'],
+                        'confidence': skill['confidence'],
+                        'reasoning': skill['reasoning']
+                    }
+                    for i, skill in enumerate(top_3_skills)
+                ],
+                'estimated_improvement': sum(
+                    s['estimated_effect'] for s in top_3_skills
+                ),
+                'summary': hte_data['summary']
+            }
+
+            recommendations.append(recommendation)
+
+        # 改善期待値でソート
+        recommendations.sort(
+            key=lambda x: x['estimated_improvement'],
+            reverse=True
+        )
+
+        return recommendations[:50]  # TOP 50のメンバーのみ
+
+    def _identify_skill_synergies(self, skill_profile, hte_results):
+        """
+        スキル相乗効果を特定
+
+        Parameters:
+        -----------
+        skill_profile: list[dict]
+            スキルプロファイル
+        hte_results: dict
+            HTE推定結果
+
+        Returns:
+        --------
+        synergies: list[dict]
+            スキル相乗効果の分析結果
+        """
+        synergies = []
+
+        # TOP 10スキルの組み合わせを分析
+        top_10_codes = [s['skill_code'] for s in skill_profile[:10]]
+
+        for skill_code_a, skill_code_b in combinations(top_10_codes, 2):
+            skill_name_a = self.skill_names[skill_code_a]
+            skill_name_b = self.skill_names[skill_code_b]
+
+            # スキルAとBの両方を持つメンバー数
+            skill_a_idx = self.skill_codes.index(skill_code_a)
+            skill_b_idx = self.skill_codes.index(skill_code_b)
+
+            has_a = (self.skill_matrix[:, skill_a_idx] > 0).astype(int)
+            has_b = (self.skill_matrix[:, skill_b_idx] > 0).astype(int)
+            has_both = (has_a & has_b).sum()
+
+            if has_both < 3:  # 両方を持つメンバーが少なすぎる
+                continue
+
+            synergy = {
+                'skill_combination': f"{skill_name_a} + {skill_name_b}",
+                'member_count_with_both': int(has_both),
+                'status': 'メンバー数が多い' if has_both >= 5 else 'レアな組み合わせ',
+                'recommendation': '相乗効果の可能性があります'
+            }
+
+            synergies.append(synergy)
+
+        return synergies[:10]  # TOP 10の組み合わせ
+
+    def _create_development_roadmap(self, excellent_members, hte_results):
+        """
+        スキル開発ロードマップを作成
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コード
+        hte_results: dict
+            HTE推定結果
+
+        Returns:
+        --------
+        roadmap: dict
+            開発ロードマップ
+        """
+        roadmap = {
+            'immediate_priority': [],  # 1ヶ月以内
+            'short_term': [],  # 3ヶ月以内
+            'medium_term': [],  # 6ヶ月以内
+            'resources_required': self._estimate_resources(hte_results)
+        }
+
+        # 効果が大きい順にスキルを分類
+        for member_code, hte_data in hte_results.items():
+            if hte_data['is_excellent']:
+                continue
+
+            top_skill = hte_data['top_5_skills'][0] if hte_data['top_5_skills'] else None
+
+            if not top_skill:
+                continue
+
+            effect = top_skill['estimated_effect']
+            confidence = top_skill['confidence']
+
+            skill_plan = {
+                'member_id': member_code,
+                'skill': top_skill['skill_name'],
+                'expected_effect': effect,
+                'confidence': confidence
+            }
+
+            if effect > 0.15 and confidence in ['High', 'Medium']:
+                roadmap['immediate_priority'].append(skill_plan)
+            elif effect > 0.10:
+                roadmap['short_term'].append(skill_plan)
+            else:
+                roadmap['medium_term'].append(skill_plan)
+
+        # 各フェーズを件数でソート
+        for phase in ['immediate_priority', 'short_term', 'medium_term']:
+            roadmap[phase].sort(
+                key=lambda x: x['expected_effect'],
+                reverse=True
+            )
+            roadmap[phase] = roadmap[phase][:10]  # 各フェーズMAX 10件
+
+        return roadmap
+
+    def _estimate_resources(self, hte_results):
+        """
+        開発に必要なリソースを推定
+
+        Parameters:
+        -----------
+        hte_results: dict
+            HTE推定結果
+
+        Returns:
+        --------
+        resources: dict
+            リソース見積もり
+        """
+        n_members_to_develop = sum(
+            1 for data in hte_results.values()
+            if not data['is_excellent'] and data['top_5_skills']
+        )
+
+        return {
+            'estimated_members_to_develop': n_members_to_develop,
+            'estimated_training_hours_per_member': 40,
+            'total_estimated_hours': n_members_to_develop * 40,
+            'recommended_timeline_months': 6,
+            'estimated_cost_per_member': 50000,  # JPY
+            'total_estimated_cost': n_members_to_develop * 50000,
+        }
 
 
 def load_csv_files(member_path, acquired_path, skill_path, education_path, license_path):
