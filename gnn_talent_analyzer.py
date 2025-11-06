@@ -1191,7 +1191,7 @@ class TalentAnalyzer:
         estimated_effect: float
             推定効果
         profile_entry: dict
-            スキルプロファイルエントリ
+            スキルプロファイルエントリ（Noneの場合もあり）
         confidence: str
             信頼度
 
@@ -1200,16 +1200,23 @@ class TalentAnalyzer:
         reasoning: str
             説明文
         """
+        effect_text = f"+{estimated_effect*100:.1f}%" if estimated_effect > 0 else f"{estimated_effect*100:.1f}%"
+
+        # profile_entryがない場合（優秀群習得率が低いスキル）も、
+        # HTEの推定値に基づいて説明を生成
         if profile_entry is None:
-            return f"統計データが不足しているため、{skill_name} の効果を推定できません"
+            reasoning = (
+                f"{skill_name}習得で優秀度が {effect_text} 変化見込み\n"
+                f"根拠：個別メンバーの特性に基づく異質的処置効果推定\n"
+                f"信頼度：{confidence}"
+            )
+            return reasoning
 
         p_excellent = profile_entry.get('p_excellent', 0)
         p_control = profile_entry.get('p_control', 0)
         significant = profile_entry.get('significant', False)
 
         sig_text = "（統計的に有意）" if significant else ""
-
-        effect_text = f"+{estimated_effect*100:.1f}%" if estimated_effect > 0 else f"{estimated_effect*100:.1f}%"
 
         reasoning = (
             f"{skill_name}習得で優秀度が {effect_text} 変化見込み\n"
@@ -1272,10 +1279,8 @@ class TalentAnalyzer:
             {
                 'executive_summary': str,
                 'top_10_skills': list,
-                'organizational_gaps': dict,
                 'member_recommendations': list,
-                'skill_combinations': list,
-                'development_roadmap': dict
+                'skill_combinations': list
             }
         """
         logger.info("=== Layer 3: 説明可能性の強化を開始 ===")
@@ -1286,20 +1291,12 @@ class TalentAnalyzer:
                 skill_profile
             ),
             'top_10_skills': skill_profile[:10],
-            'organizational_gaps': self._analyze_organizational_gaps(
-                skill_profile,
-                hte_results
-            ),
             'member_recommendations': self._generate_priority_recommendations(
                 excellent_members,
                 hte_results
             ),
             'skill_combinations': self._identify_skill_synergies(
                 skill_profile,
-                hte_results
-            ),
-            'development_roadmap': self._create_development_roadmap(
-                excellent_members,
                 hte_results
             )
         }

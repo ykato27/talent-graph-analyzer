@@ -379,9 +379,7 @@ if st.session_state.data_loaded:
         analysis_tabs = st.tabs([
             "🎯 優秀者スキルプロファイル",
             "👥 メンバー別改善提案",
-            "📊 組織スキルギャップ",
-            "🔗 スキル相乗効果",
-            "🗺️ 開発ロードマップ"
+            "🔗 スキル相乗効果"
         ])
 
         # Tab 1: スキルプロファイル（Layer 1）
@@ -449,34 +447,8 @@ if st.session_state.data_loaded:
                                 f"{skill['expected_effect']*100:+.1f}%"
                             )
 
-        # Tab 3: 組織スキルギャップ
+        # Tab 3: スキル相乗効果
         with analysis_tabs[2]:
-            st.subheader("組織スキルギャップ分析")
-
-            gaps = insights['organizational_gaps']
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.write("### 🔴 Critical Gap")
-                st.write(f"**{len(gaps['critical_gaps'])}個のスキル**")
-                for skill in gaps['critical_gaps'][:3]:
-                    st.write(f"- {skill['skill_name']}: {skill['gap']*100:+.1f}%")
-
-            with col2:
-                st.write("### 🟡 High Potential")
-                st.write(f"**{len(gaps['high_potential_skills'])}個のスキル**")
-                for skill in gaps['high_potential_skills'][:3]:
-                    st.write(f"- {skill['skill_name']}: {skill['importance']*100:+.1f}%")
-
-            with col3:
-                st.write("### 🟢 Saturation")
-                st.write(f"**{len(gaps['saturation_skills'])}個のスキル**")
-                for skill in gaps['saturation_skills'][:3]:
-                    st.write(f"- {skill['skill_name']}: {skill['adoption_rate']*100:.0f}%")
-
-        # Tab 4: スキル相乗効果
-        with analysis_tabs[3]:
             st.subheader("スキル相乗効果の可能性")
 
             synergies = insights['skill_combinations']
@@ -494,61 +466,6 @@ if st.session_state.data_loaded:
                 st.dataframe(df_synergies, use_container_width=True)
             else:
                 st.info("相乗効果が検出されませんでした")
-
-        # Tab 5: 開発ロードマップ
-        with analysis_tabs[4]:
-            st.subheader("スキル開発ロードマップ")
-
-            roadmap = insights['development_roadmap']
-            resources = roadmap['resources_required']
-
-            # リソース見積もり
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric(
-                    "開発対象メンバー数",
-                    resources['estimated_members_to_develop']
-                )
-
-            with col2:
-                st.metric(
-                    "推奨実施期間",
-                    f"{resources['recommended_timeline_months']}ヶ月"
-                )
-
-            with col3:
-                st.metric(
-                    "推定総コスト",
-                    f"¥{resources['total_estimated_cost']:,.0f}"
-                )
-
-            # 優先度付けスキルプラン
-            st.markdown("### 優先度付けスキル習得計画")
-
-            for phase, phase_name in [
-                ('immediate_priority', '🔴 即座実施（1ヶ月以内）'),
-                ('short_term', '🟡 短期計画（3ヶ月以内）'),
-                ('medium_term', '🟢 中期計画（6ヶ月以内）')
-            ]:
-                with st.expander(phase_name, expanded=(phase == 'immediate_priority')):
-
-                    plans = roadmap[phase][:10]
-
-                    if plans:
-                        df_plans = pd.DataFrame([
-                            {
-                                'メンバーID': p['member_id'],
-                                'スキル': p['skill'],
-                                '期待効果': f"{p['expected_effect']*100:+.1f}%",
-                                '信頼度': p['confidence']
-                            }
-                            for p in plans
-                        ])
-
-                        st.dataframe(df_plans, use_container_width=True)
-                    else:
-                        st.info(f"{phase_name} に該当するスキルはありません")
 
 
 # フッター
