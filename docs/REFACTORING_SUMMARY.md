@@ -26,7 +26,7 @@ talent-graph-analyzerのコードベースに対し、プロフェッショナ�
 
 ---
 
-## 新規作成ファイル一覧（24ファイル）
+## 新規作成ファイル一覧（18ファイル）
 
 ### 基盤コード
 ```
@@ -57,13 +57,9 @@ requirements/
 └── streamlit.txt           # Streamlit UI用
 ```
 
-### CI/CD & ツール設定
+### ツール設定
 ```
-.github/workflows/
-└── ci.yml                  # CI/CDパイプライン
-
 pyproject.toml              # プロジェクト設定（Black, mypy, pytest等）
-.pre-commit-config.yaml     # pre-commitフック設定
 ```
 
 ### ドキュメント

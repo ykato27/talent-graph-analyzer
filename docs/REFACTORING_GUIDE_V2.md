@@ -141,57 +141,8 @@ pip install -r requirements/dev.txt
 
 ---
 
-#### 5. ✅ CI/CDパイプラインの構築
 
-**新規追加**: `.github/workflows/ci.yml`
-
-**実行内容**:
-1. **テスト**: Python 3.9, 3.10, 3.11でマトリックステスト
-2. **リント**: flake8
-3. **型チェック**: mypy strict mode
-4. **フォーマット**: black
-5. **カバレッジ**: pytest-cov → Codecov
-6. **セキュリティ**: bandit
-7. **ドキュメント**: Sphinx（準備中）
-8. **パフォーマンス**: pytest-benchmark（準備中）
-
-**トリガー**:
-- push to main, develop, claude/*
-- pull request to main, develop
-
----
-
-#### 6. ✅ pre-commitフックの設定
-
-**新規追加**: `.pre-commit-config.yaml`
-
-**実行内容**:
-- trailing-whitespace除去
-- black フォーマット
-- flake8 リント
-- isort import整理
-- mypy 型チェック
-- bandit セキュリティチェック
-- pydocstyle docstring検証
-
-**セットアップ**:
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-**実行**:
-```bash
-# 全ファイルに対して実行
-pre-commit run --all-files
-
-# 特定のフックのみ
-pre-commit run black --all-files
-```
-
----
-
-#### 7. ✅ ロギング戦略の統一
+#### 5. ✅ ロギング戦略の統一
 
 **Before**: 不統一なロギング
 ```python
@@ -221,7 +172,7 @@ with log_execution_time(logger, "cluster-robust SE") as metadata:
 
 ### Phase 2: High Priority（実施中）
 
-#### 8. 🔄 ドキュメント生成（Sphinx）
+#### 6. 🔄 ドキュメント生成（Sphinx）
 
 **計画**:
 ```
@@ -249,7 +200,7 @@ make html
 
 ---
 
-#### 9. 🔄 パフォーマンス最適化
+#### 7. 🔄 パフォーマンス最適化
 
 **計画**:
 - プロファイリングの追加（cProfile, line_profiler）
@@ -499,18 +450,17 @@ def safe_read_file(filename: str) -> str:
 2. 型ヒント完全化
 3. エラーハンドリング強化
 4. 依存関係管理
-5. CI/CDパイプライン
-6. pre-commitフック
-7. ロギング戦略
+5. ロギング戦略
+6. 入力検証の統一
 
 ### 実装中 🔄
-8. ドキュメント生成
-9. パフォーマンス最適化
+7. ドキュメント生成
+8. パフォーマンス最適化
 
 ### 今後の課題 📋
-10. セキュリティ監査
-11. アーキテクチャドキュメント
-12. ベンチマークスイート
+9. セキュリティ監査
+10. アーキテクチャドキュメント
+11. ベンチマークスイート
 
 ---
 
