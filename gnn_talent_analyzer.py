@@ -1088,6 +1088,166 @@ class TalentAnalyzer:
 
         return hte_results
 
+    def estimate_heterogeneous_treatment_effects_with_gnn(self, excellent_members, skill_profile):
+        """
+        Layer 2: 個別メンバーへの因果効果推定（HTE）- GNN埋め込み版
+
+        GNN学習で得られた埋め込み表現を活用してHTEを推定
+        より高度な特徴表現を用いることで、精度の高い個別効果推定が可能
+
+        Parameters:
+        -----------
+        excellent_members: list
+            優秀群の社員コードリスト
+        skill_profile: list[dict]
+            Layer 1から得られたスキルプロファイル
+
+        Returns:
+        --------
+        hte_results: dict
+            メンバー別のHTE推定結果（通常版と同じ形式）
+        """
+        logger.info("=== Layer 2: 個別メンバーへの因果効果推定（GNN版）を開始 ===")
+
+        if not hasattr(self, 'embeddings') or self.embeddings is None:
+            raise ModelTrainingError("GNN学習が完了していません。先に train() を実行してください。")
+
+        excellent_indices = np.array([
+            self.member_to_idx[m] for m in excellent_members
+            if m in self.member_to_idx
+        ])
+
+        # 各メンバーの優秀フラグ
+        is_excellent = np.zeros(len(self.members))
+        is_excellent[excellent_indices] = 1
+
+        # 各スキルについて HTE を推定（GNN埋め込みを使用）
+        hte_matrix = np.zeros((len(self.members), len(self.skill_codes)))
+
+        for skill_idx in range(len(self.skill_codes)):
+            hte_matrix[:, skill_idx] = self._estimate_skill_specific_hte_with_gnn(
+                skill_idx,
+                is_excellent,
+                excellent_indices
+            )
+
+        # 結果をメンバー別にまとめる（通常版と同じ処理）
+        hte_results = {}
+
+        for member_idx, member_code in enumerate(self.members):
+            skill_effects = []
+
+            for skill_idx in range(len(self.skill_codes)):
+                skill_code = self.skill_codes[skill_idx]
+                skill_name = self.skill_names[skill_code]
+
+                estimated_effect = hte_matrix[member_idx, skill_idx]
+
+                # 対応するスキルプロファイルを取得
+                profile_entry = next(
+                    (s for s in skill_profile if s['skill_code'] == skill_code),
+                    None
+                )
+
+                # 信頼度とレベル分けを生成
+                confidence = self._calculate_confidence_level(
+                    profile_entry,
+                    estimated_effect
+                )
+
+                reasoning = self._generate_member_specific_reasoning(
+                    member_idx,
+                    skill_name,
+                    estimated_effect,
+                    profile_entry,
+                    confidence
+                )
+
+                skill_effects.append({
+                    'skill_code': skill_code,
+                    'skill_name': skill_name,
+                    'estimated_effect': estimated_effect,
+                    'confidence': confidence,
+                    'reasoning': reasoning
+                })
+
+            # TOP 5スキルを抽出
+            skill_effects_sorted = sorted(
+                skill_effects,
+                key=lambda x: abs(x['estimated_effect']),
+                reverse=True
+            )
+            top_5 = skill_effects_sorted[:5]
+
+            hte_results[member_code] = {
+                'skills': skill_effects,
+                'top_5_skills': top_5
+            }
+
+        logger.info(f"HTE推定完了（GNN版）: {len(hte_results)}メンバー")
+
+        return hte_results
+
+    def _estimate_skill_specific_hte_with_gnn(self, skill_idx, is_excellent, excellent_indices):
+        """
+        特定のスキルについて HTE を推定（GNN埋め込み版）
+
+        GNN学習で得られた埋め込み表現を特徴量として使用
+        Doubly Robust推定量を使用して、バイアスを低減する
+
+        Parameters:
+        -----------
+        skill_idx: int
+            スキルのインデックス
+        is_excellent: array
+            優秀フラグ
+        excellent_indices: array
+            優秀群のインデックス
+
+        Returns:
+        --------
+        hte: array
+            各メンバーについての推定効果
+        """
+        has_skill = (self.skill_matrix[:, skill_idx] > 0).astype(int)
+
+        try:
+            # 傾向スコアモデル（スキル習得の傾向）- GNN埋め込みを使用
+            ps_model = LogisticRegression(
+                max_iter=1000,
+                random_state=DEFAULT_RANDOM_STATE
+            )
+            ps_model.fit(self.embeddings, has_skill)
+            propensity_scores = ps_model.predict_proba(self.embeddings)[:, 1]
+
+            # スキル習得者と未習得者を分離
+            skill_acquirers = np.where(has_skill == 1)[0]
+            non_acquirers = np.where(has_skill == 0)[0]
+
+            # Doubly Robust推定量
+            hte = np.zeros(len(self.members))
+
+            for i in range(len(self.members)):
+                ps_i = propensity_scores[i]
+
+                # Propensity scoreが極端な値を避ける
+                if ps_i < 0.01 or ps_i > 0.99:
+                    hte[i] = 0
+                    continue
+
+                # スキル習得者の場合
+                if has_skill[i] == 1:
+                    hte[i] = is_excellent[i] / ps_i
+                # スキル未習得者の場合
+                else:
+                    hte[i] = -is_excellent[i] / (1 - ps_i)
+
+            return hte
+
+        except Exception as e:
+            logger.warning(f"スキル {self.skill_names.get(self.skill_codes[skill_idx], 'Unknown')} の HTE推定失敗（GNN版）: {e}")
+            return np.zeros(len(self.members))
+
     def _estimate_skill_specific_hte(self, skill_idx, is_excellent, excellent_indices):
         """
         特定のスキルについて HTE を推定
