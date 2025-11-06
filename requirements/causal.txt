@@ -1,0 +1,9 @@
+# 因果推論用の依存関係
+
+-r base.txt
+
+# Statistical inference
+statsmodels>=0.14.0,<0.15.0
+
+# Causal inference
+econml>=0.14.0,<0.15.0
