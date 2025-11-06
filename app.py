@@ -283,6 +283,9 @@ elif selected_feature == "🔬 GNN埋め込み分析（高度）":
         elif len(selected_members) > MAX_EXCELLENT_RECOMMENDED:
             st.warning(f"⚠️ {MAX_EXCELLENT_RECOMMENDED}名以下での選択を推奨します")
 
+        # セッションステートに保存（3️⃣で使用）
+        st.session_state.selected_members_gnn = selected_members
+
         st.markdown("---")
 
         # 2️⃣ GNN学習
@@ -341,60 +344,39 @@ elif selected_feature == "🔬 GNN埋め込み分析（高度）":
 
         if not st.session_state.get('gnn_trained', False):
             st.warning("⚠️ まず上の「2️⃣ GNN学習」を完了してください")
+        elif not st.session_state.get('selected_members_gnn'):
+            st.warning("⚠️ まず上の「1️⃣ 優秀人材の選択」で優秀群を選択してください")
         else:
-            with st.expander("📚 Layer 1-3 分析を実行", expanded=True):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.markdown("**優秀群の選択方法：**")
-                with col2:
-                    auto_select_n = st.number_input(
-                        "上位N名",
-                        min_value=3,
-                        max_value=20,
-                        value=10,
-                        step=1,
-                        help="スキル保有数上位N名を自動選択",
-                        key="gnn_causal_auto_n"
+            # 1️⃣で選択された優秀群を使用
+            selected_excellent = st.session_state.selected_members_gnn
+
+            st.info(f"📊 1️⃣で選択された優秀群（{len(selected_excellent)}名）を使用して分析を実行します")
+
+            if st.button("🚀 GNN版 Layer 1-3 分析を実行", type="primary", key="gnn_causal_run"):
+                try:
+                    with st.spinner("GNN版 Layer 1-3 分析を実行中...（GNN埋め込みを活用）"):
+                        skill_profile = analyzer.analyze_skill_profile_of_excellent_members(selected_excellent)
+                        hte_results = analyzer.estimate_heterogeneous_treatment_effects_with_gnn(selected_excellent, skill_profile)
+                        insights = analyzer.generate_comprehensive_insights(selected_excellent, skill_profile, hte_results)
+
+                        st.session_state.skill_profile_gnn = skill_profile
+                        st.session_state.hte_results_gnn = hte_results
+                        st.session_state.insights_gnn = insights
+
+                        st.success("✅ GNN版 Layer 1-3 分析が完了しました！")
+
+                except (CausalInferenceError, DataValidationError) as e:
+                    logger.error(f"因果推論エラー: {e}", exc_info=True)
+                    st.error(
+                        f"❌ Layer 1-3 分析の実行中にエラーが発生しました。\n"
+                        f"詳細: {str(e)}\n\n"
+                        f"対策:\n"
+                        f"- 優秀人材の人数を増やしてみてください（推奨: 5-10名）\n"
+                        f"- 対象社員の総数が十分か確認してください（推奨: 50名以上）"
                     )
-                    if st.button("🎯 自動選択", help="スキル保有数上位のメンバーを自動選択", key="gnn_causal_auto"):
-                        top_members = analyzer.get_top_skill_holders(top_n=auto_select_n)
-                        st.session_state.auto_selected_members_gnn = top_members
-                        st.success(f"✅ スキル保有数上位{len(top_members)}名を自動選択しました")
-
-                default_selection = st.session_state.get('auto_selected_members_gnn', [])
-                selected_excellent = st.multiselect(
-                    "優秀群として分析する社員を選択（最低3名）",
-                    analyzer.members,
-                    default=default_selection,
-                    help="統計的に有意な結果を得るため、5-10名の選択を推奨",
-                    key="gnn_causal_members"
-                )
-
-                if len(selected_excellent) >= 3 and st.button("🚀 GNN版 Layer 1-3 分析を実行", key="gnn_causal_run"):
-                    try:
-                        with st.spinner("GNN版 Layer 1-3 分析を実行中...（GNN埋め込みを活用）"):
-                            skill_profile = analyzer.analyze_skill_profile_of_excellent_members(selected_excellent)
-                            hte_results = analyzer.estimate_heterogeneous_treatment_effects_with_gnn(selected_excellent, skill_profile)
-                            insights = analyzer.generate_comprehensive_insights(selected_excellent, skill_profile, hte_results)
-
-                            st.session_state.skill_profile_gnn = skill_profile
-                            st.session_state.hte_results_gnn = hte_results
-                            st.session_state.insights_gnn = insights
-
-                            st.success("✅ GNN版 Layer 1-3 分析が完了しました！")
-
-                    except (CausalInferenceError, DataValidationError) as e:
-                        logger.error(f"因果推論エラー: {e}", exc_info=True)
-                        st.error(
-                            f"❌ Layer 1-3 分析の実行中にエラーが発生しました。\n"
-                            f"詳細: {str(e)}\n\n"
-                            f"対策:\n"
-                            f"- 優秀人材の人数を増やしてみてください（推奨: 5-10名）\n"
-                            f"- 対象社員の総数が十分か確認してください（推奨: 50名以上）"
-                        )
-                    except Exception as e:
-                        logger.error(f"GNN分析実行エラー: {e}", exc_info=True)
-                        st.error(f"❌ GNN分析中にエラーが発生しました: {str(e)}")
+                except Exception as e:
+                    logger.error(f"GNN分析実行エラー: {e}", exc_info=True)
+                    st.error(f"❌ GNN分析中にエラーが発生しました: {str(e)}")
 
         # GNN版分析結果の表示
         if hasattr(st.session_state, 'insights_gnn') and st.session_state.insights_gnn is not None:
