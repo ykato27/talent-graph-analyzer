@@ -301,10 +301,30 @@ if st.session_state.data_loaded:
     if st.session_state.data_loaded and st.session_state.analyzer is not None:
         with st.expander("📚 Layer 1-3 分析を実行", expanded=True):
 
+            # スキル保有数上位自動選択
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown("**優秀群の選択方法：**")
+            with col2:
+                auto_select_n = st.number_input(
+                    "上位N名",
+                    min_value=3,
+                    max_value=20,
+                    value=10,
+                    step=1,
+                    help="スキル保有数上位N名を自動選択"
+                )
+                if st.button("🎯 自動選択", help="スキル保有数上位のメンバーを自動選択"):
+                    top_members = st.session_state.analyzer.get_top_skill_holders(top_n=auto_select_n)
+                    st.session_state.auto_selected_members = top_members
+                    st.success(f"✅ スキル保有数上位{len(top_members)}名を自動選択しました")
+
             # 優秀群の選択
+            default_selection = st.session_state.get('auto_selected_members', [])
             selected_excellent = st.multiselect(
                 "優秀群として分析する社員を選択（最低3名）",
                 st.session_state.analyzer.members,
+                default=default_selection,
                 help="統計的に有意な結果を得るため、5-10名の選択を推奨"
             )
 
