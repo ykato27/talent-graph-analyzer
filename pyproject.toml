@@ -126,8 +126,6 @@ addopts = [
     "--strict-markers",
     "--strict-config",
     "--cov=causal_inference",
-    "--cov=model_evaluation",
-    "--cov=visualization",
     "--cov-report=term-missing",
     "--cov-report=html",
     "--cov-report=xml",
@@ -144,7 +142,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["causal_inference", "model_evaluation", "visualization"]
+source = ["causal_inference"]
 omit = [
     "*/tests/*",
     "*/__init__.py",

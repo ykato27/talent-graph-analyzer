@@ -33,22 +33,6 @@
    - サブグループ分析
    - 政策学習
 
-6. **ベースラインモデル比較**
-   - Logistic Regression
-   - Random Forest
-   - XGBoost
-   - GNNとの性能比較
-
-7. **クロスバリデーション**
-   - Stratified K-Fold CV
-   - Leave-One-Out CV
-   - Nested CV
-
-8. **可視化ツール**
-   - Love Plot
-   - Calibration Plot
-   - DID Plot
-
 ---
 
 ## 使用方法
@@ -291,128 +275,6 @@ print(f"期待効果合計: {recommendations['CATE'].sum():.2f}")
 
 ---
 
-### 6. ベースラインモデル比較
-
-GNNと従来手法を比較します。
-
-```python
-from model_evaluation import baseline_models
-
-# ベースラインモデルを準備
-models = {
-    'Logistic Regression': baseline_models.LogisticRegressionBaseline(),
-    'Random Forest': baseline_models.RandomForestBaseline(),
-    'XGBoost': baseline_models.XGBoostBaseline()
-}
-
-# モデル比較
-comparison_df = baseline_models.compare_models(
-    models=models,
-    X_train=X_train,
-    y_train=y_train,
-    X_test=X_test,
-    y_test=y_test,
-    feature_names=feature_names
-)
-print(comparison_df)
-
-# GNNとのベンチマーク
-benchmark_df = baseline_models.benchmark_against_gnn(
-    gnn_predictions=gnn_pred,
-    gnn_probabilities=gnn_proba,
-    baseline_models={'LR': lr_model, 'RF': rf_model},
-    X_test=X_test,
-    y_test=y_test
-)
-print(benchmark_df)
-```
-
-**結果の解釈:**
-- **Test AUC > Train AUC** → 過学習の可能性
-- **GNN AUC > ベースライン** → GNNの優位性を確認
-- **Overfit_AUC > 0.2** → 過学習に注意
-
----
-
-### 7. クロスバリデーション
-
-モデルの汎化性能を評価します。
-
-```python
-from model_evaluation import cross_validation
-
-# Stratified K-Fold CV
-cv_results = cross_validation.stratified_cv(
-    model=model,
-    X=X,
-    y=y,
-    n_splits=5,
-    metrics=['accuracy', 'precision', 'recall', 'f1', 'roc_auc']
-)
-print(f"Mean AUC: {cv_results['mean_scores']['roc_auc']:.4f} ± {cv_results['std_scores']['roc_auc']:.4f}")
-
-# Leave-One-Out CV（少数サンプル用）
-loocv_results = cross_validation.leave_one_out_cv(
-    model=model,
-    X=X,
-    y=y
-)
-print(f"LOOCV Accuracy: {loocv_results['accuracy']:.4f}")
-
-# Nested CV（ハイパーパラメータ調整付き）
-param_grid = {'n_estimators': [50, 100], 'max_depth': [5, 10]}
-nested_results = cross_validation.nested_cv(
-    model=model,
-    X=X,
-    y=y,
-    param_grid=param_grid,
-    n_outer_splits=5,
-    n_inner_splits=3
-)
-print(f"Nested CV Score: {nested_results['mean_score']:.4f}")
-```
-
----
-
-### 8. 可視化
-
-結果を可視化します。
-
-```python
-from visualization import love_plot, calibration_plot, did_plots
-
-# Love Plot（共変量バランス）
-love_plot.plot_love(
-    balance_table=balance_table,
-    save_path='./plots/love_plot.png'
-)
-
-# Calibration Plot（予測確率の信頼性）
-calibration_plot.plot_calibration(
-    y_true=y_test,
-    y_proba=y_proba,
-    n_bins=10,
-    save_path='./plots/calibration.png'
-)
-
-# DID Plot（平行トレンド）
-did_plots.plot_parallel_trends(
-    df=panel_data,
-    outcome_col='is_excellent',
-    time_col='year',
-    group_col='treated_group',
-    save_path='./plots/parallel_trends.png'
-)
-
-# DID効果プロット
-did_plots.plot_treatment_effect_over_time(
-    did_results=did_results,
-    save_path='./plots/did_effect.png'
-)
-```
-
----
-
 ## 推奨ワークフロー
 
 ### Step 1: データ準備
@@ -427,34 +289,27 @@ treatment = df['has_skill'].values
 clusters = df['department_code'].values
 ```
 
-### Step 2: ベースライン比較
-```python
-# GNNと従来手法を比較
-models = {...}
-comparison = compare_models(models, X_train, y_train, X_test, y_test)
-```
-
-### Step 3: 因果推論
+### Step 2: 因果推論
 ```python
 # PSM + 診断
 # -> 感度分析
 # -> クラスター頑健推定
 ```
 
-### Step 4: DID分析（時系列データがある場合）
+### Step 3: DID分析（時系列データがある場合）
 ```python
 # DID推定
 # -> 平行トレンド検定
 ```
 
-### Step 5: Causal Forest（より詳細なHTE）
+### Step 4: Causal Forest（より詳細なHTE）
 ```python
 # Causal Forest学習
 # -> サブグループ分析
 # -> 政策学習
 ```
 
-### Step 6: レポート生成
+### Step 5: レポート生成
 ```python
 # 可視化
 # -> 推奨事項まとめ
@@ -478,17 +333,6 @@ advanced_causal_inference:
     enabled: true
   causal_forest:
     enabled: true
-
-baseline_comparison:
-  enabled: true
-
-cross_validation:
-  enabled: true
-  method: "stratified"
-  n_splits: 5
-
-visualization:
-  enabled: true
 ```
 
 ---

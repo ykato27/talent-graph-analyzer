@@ -67,7 +67,7 @@ def cluster_robust_se(...) -> ClusterRobustResult:  # ✅ 明確
 
 **型チェック実行**:
 ```bash
-mypy causal_inference model_evaluation visualization --strict
+mypy causal_inference --strict
 ```
 
 ---
@@ -181,9 +181,7 @@ docs/
 │   ├── conf.py
 │   ├── index.rst
 │   ├── api/
-│   │   ├── causal_inference.rst
-│   │   ├── model_evaluation.rst
-│   │   └── visualization.rst
+│   │   └── causal_inference.rst
 │   ├── tutorials/
 │   │   ├── quickstart.rst
 │   │   ├── sensitivity_analysis.rst
