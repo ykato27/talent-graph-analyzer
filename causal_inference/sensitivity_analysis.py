@@ -61,6 +61,9 @@ def rosenbaum_bounds(
     if gamma_values is None:
         gamma_values = [1.0, 1.5, 2.0, 2.5, 3.0]
 
+    if len(treated_outcomes) == 0 or len(control_outcomes) == 0:
+        raise ValueError("treated_outcomes と control_outcomes は空にできません")
+
     n_treated = len(treated_outcomes)
     n_control = len(control_outcomes)
 
