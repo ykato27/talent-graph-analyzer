@@ -142,3 +142,32 @@ def test_cp932_reading_and_empty_acquisition_header(tmp_path):
     result = prepare_data(m, a.iloc[:0], as_of=date(2026, 10, 23))
     assert result.matrix.shape == (3, 0)
     assert result.quality["members_without_acquisitions"] == 3
+
+
+@pytest.mark.parametrize(
+    "level_column",
+    [
+        "力量レベル（表記）  ###[competence_level_label]###",
+        "力量レベル（表記）",
+        "competence_level_label",
+    ],
+)
+def test_data_builder_acquisition_columns(level_column):
+    m, a = frames()
+    a = a.rename(
+        columns={
+            "力量タイプ  ###[competence_type]###": "力量の種類",
+            "レベル": level_column,
+        }
+    )
+    a.loc[2, level_column] = "●"  # 資格は表記ではなく保有の有無を使う。
+    result = load(members=m, acquired=a)
+    np.testing.assert_array_equal(result.matrix.toarray(), [[1, 3], [0, 0], [0, 2]])
+
+
+def test_non_numeric_skill_label_requires_explicit_conversion():
+    m, a = frames()
+    a = a.rename(columns={"レベル": "力量レベル（表記）  ###[competence_level_label]###"})
+    a.loc[0, "力量レベル（表記）  ###[competence_level_label]###"] = "一人前"
+    with pytest.raises(ValueError, match="レベル"):
+        load(members=m, acquired=a)

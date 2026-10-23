@@ -21,7 +21,7 @@ ALIASES = {
     "enter_day": ("enter_day", "入社年月日", "入社日"),
     "job_grade": ("job_grade", "職能・等級", "等級"),
     "job_position": ("job_position", "役職"),
-    "competence_type": ("competence_type", "力量タイプ", "力量種別"),
+    "competence_type": ("competence_type", "力量タイプ", "力量種別", "力量の種類"),
     "competence_code": (
         "competence_code",
         "力量コード",
@@ -30,7 +30,7 @@ ALIASES = {
         "教育コード",
     ),
     "competence_name": ("competence_name", "力量名", "スキル名", "資格名", "教育名"),
-    "level": ("level", "レベル", "習得レベル"),
+    "level": ("level", "レベル", "習得レベル", "competence_level_label", "力量レベル（表記）"),
 }
 TYPES = {
     "SKILL": "SKILL",
