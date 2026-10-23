@@ -1,8 +1,3 @@
-# 可視化用の依存関係（オプショナル）
-
--r base.txt
-
-# Visualization
-matplotlib>=3.7.0,<4.0.0
-seaborn>=0.12.0,<1.0.0
-plotly>=5.17.0,<6.0.0
+# 廃止（2026-10-23）
+# 依存関係は pyproject.toml に一本化されました。このファイルは互換のため残していますが内容は無効です。
+# インストールは uv sync、固定版が必要な場合はルートの requirements.txt（uv export 生成）を使ってください。

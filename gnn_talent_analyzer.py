@@ -45,12 +45,26 @@ def setup_logging():
     # ファイルハンドラ
     if log_config.get('file_logging', True):
         log_dir = Path(get_config('versioning.log_dir', './logs'))
-        log_dir.mkdir(parents=True, exist_ok=True)
-
         log_file = log_dir / log_config.get('log_file', 'talent_analyzer.log')
 
         from logging.handlers import RotatingFileHandler
-        file_handler = RotatingFileHandler(
+
+        class _LazyRotatingFileHandler(RotatingFileHandler):
+            """初回 emit 時にログディレクトリを作る遅延ハンドラ。
+
+            以前は setup_logging()（= import 時）で即座に ./logs を作成する
+            副作用があった。delay=True でファイル作成も遅延させる。
+            """
+
+            def __init__(self, *args, **kwargs):
+                kwargs["delay"] = True
+                super().__init__(*args, **kwargs)
+
+            def emit(self, record):
+                Path(self.baseFilename).parent.mkdir(parents=True, exist_ok=True)
+                super().emit(record)
+
+        file_handler = _LazyRotatingFileHandler(
             log_file,
             maxBytes=log_config.get('max_bytes', 10485760),
             backupCount=log_config.get('backup_count', 5)

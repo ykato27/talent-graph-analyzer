@@ -85,3 +85,5 @@ docs/_build/
 
 # OS
 Thumbs.db
+.coverage.*
+coverage.xml
