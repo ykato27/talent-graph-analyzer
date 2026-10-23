@@ -87,3 +87,10 @@ docs/_build/
 Thumbs.db
 .coverage.*
 coverage.xml
+
+# Local inputs and generated analysis (may contain personal data)
+data/
+results/
+outputs/
+*.npz
+.superpowers/

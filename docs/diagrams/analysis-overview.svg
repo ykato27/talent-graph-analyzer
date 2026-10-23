@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 615.3199999999999 366.3" width="615.3199999999999" height="366.3" style="--bg:#ffffff;--fg:#1f2328;--line:#d1d9e0;--accent:#0969da;--muted:#59636e;background:var(--bg)">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Hiragino%20Sans:wght@400;500;600;700&amp;display=swap');
+  text { font-family: 'Hiragino Sans', system-ui, sans-serif; }
+  svg {
+    /* Derived from --bg and --fg (overridable via --line, --accent, etc.) */
+    --_text:          var(--fg);
+    --_text-sec:      var(--muted, color-mix(in srgb, var(--fg) 60%, var(--bg)));
+    --_text-muted:    var(--muted, color-mix(in srgb, var(--fg) 40%, var(--bg)));
+    --_text-faint:    color-mix(in srgb, var(--fg) 25%, var(--bg));
+    --_line:          var(--line, color-mix(in srgb, var(--fg) 50%, var(--bg)));
+    --_arrow:         var(--accent, color-mix(in srgb, var(--fg) 85%, var(--bg)));
+    --_node-fill:     var(--surface, color-mix(in srgb, var(--fg) 3%, var(--bg)));
+    --_node-stroke:   var(--border, color-mix(in srgb, var(--fg) 20%, var(--bg)));
+    --_group-fill:    var(--bg);
+    --_group-hdr:     color-mix(in srgb, var(--fg) 5%, var(--bg));
+    --_inner-stroke:  color-mix(in srgb, var(--fg) 12%, var(--bg));
+    --_key-badge:     color-mix(in srgb, var(--fg) 10%, var(--bg));
+  }
+</style>
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="5" refX="7" refY="2.5" orient="auto">
+    <polygon points="0 0, 8 2.5, 0 5" fill="var(--_arrow)" stroke="var(--_arrow)" stroke-width="0.75" stroke-linejoin="round" />
+  </marker>
+  <marker id="arrowhead-start" markerWidth="8" markerHeight="5" refX="1" refY="2.5" orient="auto-start-reverse">
+    <polygon points="8 0, 0 2.5, 8 5" fill="var(--_arrow)" stroke="var(--_arrow)" stroke-width="0.75" stroke-linejoin="round" />
+  </marker>
+</defs>
+<polyline class="edge" data-from="A" data-to="C" data-style="solid" data-arrow-start="false" data-arrow-end="true" points="185.765,77.80000000000001 185.765,97.80000000000001 303.955,97.80000000000001 303.955,117.80000000000001" fill="none" stroke="var(--_line)" stroke-width="1" marker-end="url(#arrowhead)" />
+<polyline class="edge" data-from="B" data-to="C" data-style="solid" data-arrow-start="false" data-arrow-end="true" points="422.145,77.80000000000001 422.145,97.80000000000001 303.955,97.80000000000001 303.955,117.80000000000001" fill="none" stroke="var(--_line)" stroke-width="1" marker-end="url(#arrowhead)" />
+<polyline class="edge" data-from="C" data-to="D" data-style="solid" data-arrow-start="false" data-arrow-end="true" points="303.955,154.70000000000002 303.955,174.70000000000002 156.125,174.70000000000002 156.125,194.70000000000002" fill="none" stroke="var(--_line)" stroke-width="1" marker-end="url(#arrowhead)" />
+<polyline class="edge" data-from="C" data-to="E" data-style="solid" data-arrow-start="false" data-arrow-end="true" points="303.955,154.70000000000002 303.955,174.70000000000002 451.78499999999997,174.70000000000002 451.78499999999997,194.70000000000002" fill="none" stroke="var(--_line)" stroke-width="1" marker-end="url(#arrowhead)" />
+<polyline class="edge" data-from="D" data-to="F" data-style="solid" data-arrow-start="false" data-arrow-end="true" points="156.125,248.50000000000003 156.125,268.5 303.955,268.5 303.955,288.5" fill="none" stroke="var(--_line)" stroke-width="1" marker-end="url(#arrowhead)" />
+<polyline class="edge" data-from="E" data-to="F" data-style="solid" data-arrow-start="false" data-arrow-end="true" points="451.78499999999997,248.50000000000003 451.78499999999997,268.5 303.955,268.5 303.955,288.5" fill="none" stroke="var(--_line)" stroke-width="1" marker-end="url(#arrowhead)" />
+<g class="node" data-id="A" data-label="SkillnoteのCSV
+社員・力量の習得記録" data-shape="rectangle">
+  <rect x="90.69" y="24" width="190.14999999999998" height="53.800000000000004" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="185.765" y="50.900000000000006" text-anchor="middle" font-size="13" font-weight="500" fill="var(--_text)"><tspan x="185.765" dy="-3.9000000000000012">SkillnoteのCSV</tspan><tspan x="185.765" dy="16.900000000000002">社員・力量の習得記録</tspan></text>
+</g>
+<g class="node" data-id="C" data-label="社員ごとの力量の組み合わせを比較" data-shape="rectangle">
+  <rect x="164.42000000000002" y="117.80000000000001" width="279.06999999999994" height="36.900000000000006" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="303.955" y="136.25" text-anchor="middle" font-size="13" font-weight="500" fill="var(--_text)" dy="4.55">社員ごとの力量の組み合わせを比較</text>
+</g>
+<g class="node" data-id="B" data-label="比較の基準にする社員を指定
+例：指導担当の6名" data-shape="rectangle">
+  <rect x="304.84" y="24" width="234.60999999999999" height="53.800000000000004" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="422.145" y="50.900000000000006" text-anchor="middle" font-size="13" font-weight="500" fill="var(--_text)"><tspan x="422.145" dy="-3.9000000000000012">比較の基準にする社員を指定</tspan><tspan x="422.145" dy="16.900000000000002">例：指導担当の6名</tspan></text>
+</g>
+<g class="node" data-id="D" data-label="共通する力量
+基準群と他の社員で保有率を比較" data-shape="rectangle">
+  <rect x="24" y="194.70000000000002" width="264.25" height="53.800000000000004" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="156.125" y="221.60000000000002" text-anchor="middle" font-size="13" font-weight="500" fill="var(--_text)"><tspan x="156.125" dy="-3.9000000000000012">共通する力量</tspan><tspan x="156.125" dy="16.900000000000002">基準群と他の社員で保有率を比較</tspan></text>
+</g>
+<g class="node" data-id="E" data-label="似ている社員
+力量の組み合わせから類似度を算出" data-shape="rectangle">
+  <rect x="312.25" y="194.70000000000002" width="279.06999999999994" height="53.800000000000004" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="451.78499999999997" y="221.60000000000002" text-anchor="middle" font-size="13" font-weight="500" fill="var(--_text)"><tspan x="451.78499999999997" dy="-3.9000000000000012">似ている社員</tspan><tspan x="451.78499999999997" dy="16.900000000000002">力量の組み合わせから類似度を算出</tspan></text>
+</g>
+<g class="node" data-id="F" data-label="結果をCSVと説明文に保存
+教育担当者が確認する材料に" data-shape="rectangle">
+  <rect x="186.65" y="288.5" width="234.60999999999999" height="53.800000000000004" rx="0" ry="0" fill="var(--_node-fill)" stroke="var(--_node-stroke)" stroke-width="0.75" />
+  <text x="303.955" y="315.4" text-anchor="middle" font-size="13" font-weight="500" fill="var(--_text)"><tspan x="303.955" dy="-3.9000000000000012">結果をCSVと説明文に保存</tspan><tspan x="303.955" dy="16.900000000000002">教育担当者が確認する材料に</tspan></text>
+</g>
+</svg>
